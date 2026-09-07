@@ -70,6 +70,7 @@ create table if not exists public.judge_assignments (
   event_id uuid not null references public.events(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
   role text not null default 'judge',
+  category_ids uuid[] not null default '{}'::uuid[],
   primary key(event_id,user_id)
 );
 
@@ -93,6 +94,7 @@ alter table public.categories add column if not exists min_birth_year int;
 alter table public.categories add column if not exists max_birth_year int;
 alter table public.categories add column if not exists heat_size int not null default 4;
 alter table public.riders add column if not exists birth_year int;
+alter table public.judge_assignments add column if not exists category_ids uuid[] not null default '{}'::uuid[];
 
 -- Safe public leaderboard view. No birth date, email or phone is exposed.
 create or replace view public.public_entries as
@@ -118,21 +120,49 @@ create or replace function public.is_admin()
 returns boolean language sql stable security definer set search_path=public as $$
   select exists(select 1 from public.profiles p where p.id=auth.uid() and p.role='admin');
 $$;
+create or replace function public.is_judge()
+returns boolean language sql stable security definer set search_path=public as $$
+  select exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('judge','head_judge','admin'));
+$$;
+create or replace function public.can_access_category(p_event_id uuid, p_category_id uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+  select public.is_admin() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role='registration') or exists(
+    select 1 from public.judge_assignments ja
+    where ja.event_id=p_event_id and ja.user_id=auth.uid()
+      and ja.role in ('judge','head_judge','speaker')
+      and (coalesce(array_length(ja.category_ids, 1), 0)=0 or p_category_id=any(ja.category_ids))
+  );
+$$;
 
 -- Public may read event/category info. Sensitive rider records stay staff-only.
 create policy "events public read" on public.events for select using (true);
 create policy "categories public read" on public.categories for select using (true);
-create policy "riders staff read" on public.riders for select using (public.is_staff());
-create policy "registrations staff read" on public.registrations for select using (public.is_staff());
+drop policy if exists "riders staff read" on public.riders;
+drop policy if exists "registrations staff read" on public.registrations;
+create policy "riders staff read" on public.riders for select using (
+  public.is_staff() and (public.is_admin() or exists(
+    select 1 from public.registrations reg
+    where reg.rider_id=public.riders.id and public.can_access_category(reg.event_id, reg.category_id)
+  ))
+);
+create policy "registrations staff read" on public.registrations for select using (
+  public.is_staff() and public.can_access_category(event_id, category_id)
+);
 create policy "scores public read" on public.scores for select using (true);
 
--- Staff writes
-create policy "riders staff insert" on public.riders for insert with check (public.is_staff());
-create policy "riders staff update" on public.riders for update using (public.is_staff());
-create policy "registrations staff insert" on public.registrations for insert with check (public.is_staff());
-create policy "registrations staff update" on public.registrations for update using (public.is_staff());
-create policy "scores judges insert" on public.scores for insert with check (public.is_staff() and judge_id=auth.uid());
-create policy "scores judges update own" on public.scores for update using (judge_id=auth.uid());
+-- Only admins may change registration data. Judges may submit their own scores.
+drop policy if exists "riders staff insert" on public.riders;
+drop policy if exists "riders staff update" on public.riders;
+drop policy if exists "registrations staff insert" on public.registrations;
+drop policy if exists "registrations staff update" on public.registrations;
+drop policy if exists "scores judges insert" on public.scores;
+drop policy if exists "scores judges update own" on public.scores;
+create policy "riders admin insert" on public.riders for insert with check (public.is_admin());
+create policy "riders admin update" on public.riders for update using (public.is_admin());
+create policy "registrations admin insert" on public.registrations for insert with check (public.is_admin());
+create policy "registrations admin update" on public.registrations for update using (public.is_admin());
+create policy "scores judges insert" on public.scores for insert with check (public.is_judge() and judge_id=auth.uid());
+create policy "scores judges update own" on public.scores for update using (public.is_judge() and judge_id=auth.uid());
 create policy "profiles self read" on public.profiles for select using (id=auth.uid() or public.is_admin());
 create policy "profiles admin update" on public.profiles for update using (public.is_admin());
 create policy "events admin all" on public.events for all using (public.is_admin()) with check (public.is_admin());
