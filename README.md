@@ -80,3 +80,13 @@ Po dodání scoringového Excelu upravit 1:1:
 ## Doporučený produkční tok
 
 Přihláška -> databáze -> prezence -> kategorie/startovka -> rozhodčí -> realtime score -> live výsledky -> CSV/PDF export.
+
+## Stav vývoje
+
+Toto je původní DEMO prototyp. Samotné doplnění Supabase klíčů nestačí k ostrému provozu: načítání a ukládání skóre, synchronizace mezi zařízeními a oprávnění se musí dokončit a otestovat. Scoringová pravidla čekají na původní Excel.
+
+## Propojení GitHub → Netlify
+
+Repozitář: https://github.com/MartinNogol/ridescore
+
+V existujícím Netlify projektu propojte tento repozitář, větev `main`. Build command ponechte prázdný, Publish directory nastavte na `.`. Po propojení se změny v `main` automaticky nasadí.
