@@ -109,7 +109,7 @@
       const result = {...raw, events:raw.events.map(ensureEvent)};
       result.activeEventId = result.activeEventId || result.events[0]?.id;
       result.judgeState = result.judgeState || {categoryId:'', riderIndex:0, run:1, values:{}};
-      result.speakerState = result.speakerState || {categoryId:'', heat:1, riderIndex:0};
+      result.speakerState = result.speakerState || {categoryId:'', heat:0, riderIndex:0};
       return result;
     }
     const oldEvent = raw?.event || {};
@@ -123,7 +123,7 @@
     });
     return {events:[ensureEvent(migrated)], activeEventId:migrated.id, currentUser:raw?.currentUser || null,
       judgeState:raw?.judgeState || {categoryId:'', riderIndex:0, run:1, values:{}},
-      speakerState:raw?.speakerState || {categoryId:'', heat:1, riderIndex:0}};
+      speakerState:raw?.speakerState || {categoryId:'', heat:0, riderIndex:0}};
   }
   const store = {
     load(){
@@ -149,7 +149,7 @@
   const activeEvent = () => state.events.find(event => event.id === state.activeEventId) || state.events[0];
   const setActiveEvent = (id, routeName = 'live') => {
     if (!state.events.some(event => event.id === id)) return;
-    state.activeEventId = id; state.judgeState = {categoryId:'', riderIndex:0, run:1, values:{}}; state.speakerState = {categoryId:'', heat:1, riderIndex:0}; store.save(); location.hash = routeName;
+    state.activeEventId = id; state.judgeState = {categoryId:'', riderIndex:0, run:1, values:{}}; state.speakerState = {categoryId:'', heat:0, riderIndex:0}; store.save(); location.hash = routeName;
   };
   const eventCategories = event => event.categories.slice().sort((a,b)=>(a.order || 0) - (b.order || 0));
   const categoryName = (event, id) => event.categories.find(category => category.id === id)?.name || 'Bez kategorie';
@@ -327,10 +327,10 @@
   function speakerRiders(event) { return event.riders.filter(rider => rider.categoryId === state.speakerState.categoryId && (!state.speakerState.heat || Number(rider.heat) === Number(state.speakerState.heat))).sort((a,b) => a.bib - b.bib); }
   function renderSpeaker() {
     const event = activeEvent(); const categories = accessibleCategories(event); if (!state.speakerState.categoryId || !categories.some(category => category.id === state.speakerState.categoryId)) state.speakerState.categoryId = categories[0]?.id || '';
-    const category = event.categories.find(item => item.id === state.speakerState.categoryId); const maxHeat = category ? Math.max(heatCount(event, category), ...event.riders.filter(rider => rider.categoryId === category.id).map(rider => Number(rider.heat) || 0)) : 1; if (!state.speakerState.heat) state.speakerState.heat = 1; const list = speakerRiders(event); const index = Math.min(state.speakerState.riderIndex || 0, Math.max(list.length - 1, 0)); const rider = list[index];
+    const category = event.categories.find(item => item.id === state.speakerState.categoryId); const assignedHeats = category ? [...new Set(event.riders.filter(rider => rider.categoryId === category.id).map(rider => Number(rider.heat)).filter(heat => heat > 0))].sort((a,b) => a - b) : []; const maxHeat = category ? Math.max(heatCount(event, category), ...assignedHeats, 1) : 1; if (!assignedHeats.length) state.speakerState.heat = 0; else if (state.speakerState.heat && !assignedHeats.includes(Number(state.speakerState.heat))) state.speakerState.heat = 0; const list = speakerRiders(event); const index = Math.min(state.speakerState.riderIndex || 0, Math.max(list.length - 1, 0)); const rider = list[index];
     const content = adminHeader('Speaker mode', 'Startovní listina s informacemi pro uvádění jezdců.', `<select id="speakerCat" class="select">${categories.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === state.speakerState.categoryId ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}</select><select id="speakerHeat" class="select"><option value="0">Všechny heaty</option>${Array.from({length:maxHeat}, (_,heatIndex) => `<option value="${heatIndex + 1}" ${Number(state.speakerState.heat) === heatIndex + 1 ? 'selected' : ''}>Heat ${heatIndex + 1}</option>`).join('')}</select>`) + (rider ? `<div class="speaker-layout"><div class="card speaker-card"><div class="current-rider"><div style="display:flex;gap:14px;align-items:center"><div class="bib">${rider.bib}</div><div><div class="eyebrow">HEAT ${rider.heat || '—'}</div><h2>${escapeHtml(rider.name)}</h2><div class="muted">${rider.birthYear || '—'} • ${escapeHtml(categoryName(event, rider.categoryId))}</div></div></div><span class="pill">${index + 1} / ${list.length}</span></div><div class="speaker-facts"><div><span>Bydliště</span><b>${escapeHtml(rider.city || '—')}</b></div><div><span>Sponzoři</span><b>${escapeHtml(rider.sponsors || '—')}</b></div><div><span>Instagram</span><b>${escapeHtml(rider.instagram || '—')}</b></div></div><div class="speaker-bio"><span>Info pro speakera</span><p>${escapeHtml(rider.bio || 'Informace zatím nejsou vyplněné.')}</p></div><div class="grid grid-2 mt"><button class="btn btn-outline" data-speaker-prev>← Předchozí</button><button class="btn btn-primary" data-speaker-next>Další →</button></div></div><aside class="card"><h3>Startovka heat ${state.speakerState.heat || 'všech'}</h3>${list.map((item,itemIndex) => `<button class="speaker-list-row ${item.id === rider.id ? 'active' : ''}" data-speaker-index="${itemIndex}"><b>#${item.bib}</b><span>${escapeHtml(item.name)}</span><small>${item.birthYear || '—'}</small></button>`).join('') || '<span class="muted">Heat zatím nemá jezdce.</span>'}</aside></div>` : '<div class="card empty">Pro tuto volbu není žádný jezdec.</div>');
     app.innerHTML = layoutSide(content, 'speaker'); bindAdminCommon();
-    $('#speakerCat').onchange = eventTarget => { state.speakerState.categoryId = eventTarget.target.value; state.speakerState.heat = 1; state.speakerState.riderIndex = 0; save(); renderSpeaker(); }; $('#speakerHeat').onchange = eventTarget => { state.speakerState.heat = Number(eventTarget.target.value); state.speakerState.riderIndex = 0; save(); renderSpeaker(); }; $('[data-speaker-prev]')?.addEventListener('click', () => { state.speakerState.riderIndex = Math.max(0, index - 1); save(); renderSpeaker(); }); $('[data-speaker-next]')?.addEventListener('click', () => { state.speakerState.riderIndex = Math.min(Math.max(list.length - 1, 0), index + 1); save(); renderSpeaker(); }); $$('[data-speaker-index]').forEach(button => button.onclick = () => { state.speakerState.riderIndex = Number(button.dataset.speakerIndex); save(); renderSpeaker(); });
+    $('#speakerCat').onchange = eventTarget => { state.speakerState.categoryId = eventTarget.target.value; state.speakerState.heat = 0; state.speakerState.riderIndex = 0; save(); renderSpeaker(); }; $('#speakerHeat').onchange = eventTarget => { state.speakerState.heat = Number(eventTarget.target.value); state.speakerState.riderIndex = 0; save(); renderSpeaker(); }; $('[data-speaker-prev]')?.addEventListener('click', () => { state.speakerState.riderIndex = Math.max(0, index - 1); save(); renderSpeaker(); }); $('[data-speaker-next]')?.addEventListener('click', () => { state.speakerState.riderIndex = Math.min(Math.max(list.length - 1, 0), index + 1); save(); renderSpeaker(); }); $$('[data-speaker-index]').forEach(button => button.onclick = () => { state.speakerState.riderIndex = Number(button.dataset.speakerIndex); save(); renderSpeaker(); });
   }
 
   function openEventForm(id) {
