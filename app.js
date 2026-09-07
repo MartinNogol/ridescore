@@ -1,289 +1,304 @@
 (() => {
+  'use strict';
   const CFG = window.SCOOT_CONFIG || {};
   const hasSupabase = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
   const DEMO = CFG.DEMO_MODE !== false || !hasSupabase;
   const sb = hasSupabase ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY) : null;
-  const $ = (s, root=document) => root.querySelector(s);
-  const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const app = $('#app');
   const modeBadge = $('#modeBadge');
-  modeBadge.textContent = DEMO ? 'DEMO režim • data zůstávají v tomto prohlížeči' : 'ONLINE • Supabase';
+  modeBadge.textContent = DEMO ? 'DEMO • data zůstávají v tomto prohlížeči' : 'ONLINE • Supabase';
+
+  const yearNow = new Date().getFullYear();
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const uid = (prefix = 'id') => prefix + Math.random().toString(36).slice(2, 9);
+  const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, char => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;'
+  }[char]));
+  const parseYear = value => {
+    const match = String(value ?? '').match(/(?:19|20)\d{2}/);
+    const year = match ? Number(match[0]) : Number(value);
+    return Number.isInteger(year) && year >= 1900 && year <= yearNow + 1 ? year : null;
+  };
+  const dateLabel = value => {
+    if (!value) return 'Datum není nastavený';
+    const date = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return date ? `${Number(date[3])}. ${Number(date[2])}. ${date[1]}` : String(value);
+  };
+  const statusLabel = value => ({draft:'Koncept', registration:'Registrace', live:'LIVE', finished:'Dokončeno'}[value] || value || 'Koncept');
+  const statusClass = value => value === 'live' ? 'live' : value === 'finished' ? '' : 'warn';
 
   const scoringDefault = [
-    {key:'difficulty',label:'Difficulty',max:25,weight:1,desc:'Obtížnost'},
-    {key:'diversity',label:'Diversity',max:25,weight:1,desc:'Rozmanitost'},
-    {key:'style',label:'Style',max:25,weight:1,desc:'Styl'},
-    {key:'consistency',label:'Consistency',max:25,weight:1,desc:'Konzistence'}
+    {key:'difficulty', label:'Difficulty', max:25, weight:1, desc:'Obtížnost triků a kombinací'},
+    {key:'diversity', label:'Diversity', max:25, weight:1, desc:'Rozmanitost triků'},
+    {key:'style', label:'Style', max:25, weight:1, desc:'Styl, flow a originalita'},
+    {key:'consistency', label:'Consistency', max:25, weight:1, desc:'Čistota a jistota provedení'}
   ];
 
-  const seed = {
-    currentUser:null,
-    event:{id:'ev1',name:'Scootshop Contest 2026',slug:'scootshop-contest-2026',date:'29. 8. 2026',location:'Ústí nad Orlicí',status:'live',judgeCount:5},
-    categories:[
-      {id:'c1',name:'U13',runs:2,advance:8,order:1},
-      {id:'c2',name:'U16',runs:2,advance:8,order:2},
-      {id:'c3',name:'OPEN',runs:2,advance:10,order:3},
-      {id:'c4',name:'PRO',runs:2,advance:8,order:4}
-    ],
-    scoring:scoringDefault,
-    riders:[
-      {id:'r1',bib:21,name:'Demo jezdec 1',categoryId:'c2',city:'',birth:'',sponsors:'',instagram:'',bio:'',status:'checked-in'},
-      {id:'r2',bib:34,name:'Demo jezdec 2',categoryId:'c2',city:'',birth:'',sponsors:'',instagram:'',bio:'',status:'checked-in'},
-      {id:'r3',bib:18,name:'Demo jezdec 3',categoryId:'c2',city:'',birth:'',sponsors:'',instagram:'',bio:'',status:'checked-in'},
-      {id:'r4',bib:7,name:'Demo jezdec 4',categoryId:'c2',city:'',birth:'',sponsors:'',instagram:'',bio:'',status:'checked-in'},
-      {id:'r5',bib:51,name:'Demo jezdec 5',categoryId:'c3',city:'',birth:'',sponsors:'',instagram:'',bio:'',status:'registered'},
-      {id:'r6',bib:3,name:'Demo jezdec 6',categoryId:'c4',city:'',birth:'',sponsors:'',instagram:'',bio:'',status:'checked-in'}
-    ],
-    scores:[],
-    judges:[
-      {id:'admin',name:'Demo administrátor',email:'admin@example.invalid',role:'admin'},
-      ...Array.from({length:5},(_,i)=>({id:'judge-'+(i+1),name:'Demo porotce '+(i+1),email:'judge'+(i+1)+'@example.invalid',role:'judge'}))
-    ],
-    judgeState:{categoryId:'c2',riderIndex:0,run:1,values:{}}
-  };
+  const defaultCategories = () => [
+    {id:'cat-plus14', name:'+14 let', minBirthYear:null, maxBirthYear:yearNow - 14, heatSize:4, order:1},
+    {id:'cat-minus14', name:'-14 let', minBirthYear:yearNow - 13, maxBirthYear:null, heatSize:4, order:2}
+  ];
+  const demoJudges = () => [
+    {id:'admin', name:'Demo administrátor', email:'admin@example.invalid', role:'admin'},
+    ...Array.from({length:5}, (_, index) => ({id:`judge-${index + 1}`, name:`Demo porotce ${index + 1}`, email:`judge${index + 1}@example.invalid`, role:'judge'}))
+  ];
+  const newEvent = (overrides = {}) => ({
+    id:overrides.id || uid('event'), slug:overrides.slug || uid('event'),
+    name:overrides.name || 'Nový závod', date:overrides.date || '',
+    location:overrides.location || '', info:overrides.info || '',
+    status:overrides.status || 'draft', judgeCount:[3,5].includes(overrides.judgeCount) ? overrides.judgeCount : 5,
+    runCount:Math.min(3, Math.max(1, Number(overrides.runCount) || 2)),
+    scoring:clone(overrides.scoring || scoringDefault),
+    categories:clone(overrides.categories || defaultCategories()),
+    riders:clone(overrides.riders || []), scores:clone(overrides.scores || []),
+    judges:clone(overrides.judges || demoJudges()), panelIds:clone(overrides.panelIds || []),
+    createdAt:overrides.createdAt || new Date().toISOString()
+  });
 
+  function rangeMatch(category, birthYear) {
+    return Number.isInteger(birthYear) &&
+      (category.minBirthYear == null || birthYear >= Number(category.minBirthYear)) &&
+      (category.maxBirthYear == null || birthYear <= Number(category.maxBirthYear));
+  }
+  function categoryForYear(event, birthYear) {
+    return event.categories.slice().sort((a,b)=>(a.order || 0) - (b.order || 0)).find(category => rangeMatch(category, birthYear));
+  }
+  function assignCategory(event, rider) {
+    const category = categoryForYear(event, parseYear(rider.birthYear));
+    const next = category?.id || '';
+    if (rider.categoryId !== next) rider.heat = null;
+    rider.categoryId = next;
+    return next;
+  }
+  function ensureEvent(event) {
+    Object.assign(event, newEvent(event));
+    event.categories = Array.isArray(event.categories) ? event.categories : defaultCategories();
+    event.riders = Array.isArray(event.riders) ? event.riders : [];
+    event.scores = Array.isArray(event.scores) ? event.scores : [];
+    event.judges = Array.isArray(event.judges) && event.judges.length ? event.judges : demoJudges();
+    event.panelIds = Array.isArray(event.panelIds) ? event.panelIds : [];
+    event.scoring = Array.isArray(event.scoring) && event.scoring.length ? event.scoring : clone(scoringDefault);
+    event.judgeCount = [3,5].includes(Number(event.judgeCount)) ? Number(event.judgeCount) : 5;
+    event.runCount = Math.min(3, Math.max(1, Number(event.runCount) || 2));
+    event.categories.forEach((category, index) => {
+      category.id = category.id || uid('cat'); category.order = Number(category.order) || index + 1;
+      category.heatSize = Math.max(1, Number(category.heatSize) || 4);
+      category.minBirthYear = parseYear(category.minBirthYear);
+      category.maxBirthYear = parseYear(category.maxBirthYear);
+    });
+    event.riders.forEach((rider, index) => {
+      rider.id = rider.id || uid('rider'); rider.registrationOrder = Number(rider.registrationOrder) || index + 1;
+      rider.birthYear = parseYear(rider.birthYear || rider.birth);
+      rider.bib = Number(rider.bib) || index + 1; rider.status = rider.status || 'registered';
+      if (event.categories.some(category => category.minBirthYear != null || category.maxBirthYear != null)) assignCategory(event, rider);
+    });
+    event.scores.forEach(score => {
+      if (!score.judgeId) score.judgeId = event.judges.find(judge => judge.name === score.judge)?.id || `legacy:${score.judge || 'unknown'}`;
+      score.run = Number(score.run) || 1; score.total = Number(score.total);
+    });
+    const available = event.judges.filter(judge => ['judge','head_judge'].includes(judge.role));
+    event.panelIds = event.panelIds.filter(id => available.some(judge => judge.id === id));
+    while (event.panelIds.length < event.judgeCount && available[event.panelIds.length]) event.panelIds.push(available[event.panelIds.length].id);
+    return event;
+  }
+
+  function normalize(raw) {
+    if (raw && Array.isArray(raw.events)) {
+      const result = {...raw, events:raw.events.map(ensureEvent)};
+      result.activeEventId = result.activeEventId || result.events[0]?.id;
+      result.judgeState = result.judgeState || {categoryId:'', riderIndex:0, run:1, values:{}};
+      result.speakerState = result.speakerState || {categoryId:'', heat:1, riderIndex:0};
+      return result;
+    }
+    const oldEvent = raw?.event || {};
+    const migrated = newEvent({
+      ...oldEvent, id:oldEvent.id || 'event-demo', name:oldEvent.name || 'Scootshop Contest 2026',
+      date:oldEvent.date || '',
+      judgeCount:oldEvent.judgeCount || 5, runCount:oldEvent.runCount || 2,
+      categories:raw?.categories || defaultCategories(), scoring:raw?.scoring || scoringDefault,
+      riders:(raw?.riders || []).map((rider, index) => ({...rider, birthYear:parseYear(rider.birthYear || rider.birth), registrationOrder:index + 1})),
+      scores:raw?.scores || [], judges:raw?.judges || demoJudges(), panelIds:oldEvent.panelIds || []
+    });
+    return {events:[ensureEvent(migrated)], activeEventId:migrated.id, currentUser:raw?.currentUser || null,
+      judgeState:raw?.judgeState || {categoryId:'', riderIndex:0, run:1, values:{}},
+      speakerState:raw?.speakerState || {categoryId:'', heat:1, riderIndex:0}};
+  }
   const store = {
     load(){
-      if(!DEMO) return structuredClone(seed);
+      if (!DEMO) return normalize({events:[newEvent({id:'event-online', name:'Scoot Scoring'})], activeEventId:'event-online'});
       const raw = localStorage.getItem('scootScoringData');
-      if(!raw){ localStorage.setItem('scootScoringData',JSON.stringify(seed)); return structuredClone(seed); }
-      try{return JSON.parse(raw)}catch{return structuredClone(seed)}
+      if (!raw) return normalize({events:[seedEvent], activeEventId:seedEvent.id});
+      try { return normalize(JSON.parse(raw)); } catch { return normalize({events:[seedEvent], activeEventId:seedEvent.id}); }
     },
-    save(){ if(DEMO) localStorage.setItem('scootScoringData',JSON.stringify(state)); }
+    save(){ if (DEMO) localStorage.setItem('scootScoringData', JSON.stringify(state)); }
   };
+  const seedEvent = newEvent({
+    id:'event-demo', slug:'scootshop-contest-2026', name:'Scootshop Contest 2026', date:'2026-08-29', location:'Ústí nad Orlicí',
+    info:'Ukázkový závod pro nastavení kategorií, heatů a poroty.', status:'live', judgeCount:5, runCount:2,
+    riders:[
+      {id:'r1', registrationOrder:1, bib:21, name:'Demo jezdec 1', birthYear:2012, city:'', sponsors:'', instagram:'', bio:'', status:'checked-in'},
+      {id:'r2', registrationOrder:2, bib:34, name:'Demo jezdec 2', birthYear:2011, city:'', sponsors:'', instagram:'', bio:'', status:'checked-in'},
+      {id:'r3', registrationOrder:3, bib:18, name:'Demo jezdec 3', birthYear:2014, city:'', sponsors:'', instagram:'', bio:'', status:'checked-in'},
+      {id:'r4', registrationOrder:4, bib:7, name:'Demo jezdec 4', birthYear:2015, city:'', sponsors:'', instagram:'', bio:'', status:'checked-in'}
+    ]
+  });
   let state = store.load();
-  state.event.judgeCount = [3,5].includes(state.event.judgeCount) ? state.event.judgeCount : 5;
-  if (!state.event.panelIds) {
-    state.event.panelIds = state.judges.filter(j=>['judge','head_judge'].includes(j.role)).slice(0,state.event.judgeCount).map(j=>j.id);
-    // Existing browser data stays intact. New demo slots only fill missing seats.
-    while (DEMO && state.event.panelIds.length < state.event.judgeCount) {
-      const id='demo-panel-'+(state.event.panelIds.length+1);
-      if (!state.judges.some(j=>j.id===id)) state.judges.push({id,name:'Demo porotce '+(state.event.panelIds.length+1),email:id+'@example.invalid',role:'judge'});
-      state.event.panelIds.push(id);
-    }
-  }
-  for (const score of state.scores) {
-    if (!score.judgeId) score.judgeId=state.judges.find(j=>j.name===score.judge)?.id || 'legacy:'+score.judge;
-  }
-  store.save();
-  const panel = () => state.event.panelIds.slice(0,state.event.judgeCount);
-  const ruleText = () => state.event.judgeCount===5 ? '5 porotců • nejnižší a nejvyšší známka se škrtá • průměr 3' : '3 porotci • průměr všech 3 známek';
-  const currentJudgeId = () => DEMO ? (state.judgeState.judgeId || panel()[0]) : state.currentUser?.id;
-
-
-  const escapeHtml = (v='') => String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-  const uid = (p='id') => p+Math.random().toString(36).slice(2,9);
-  const catName = id => state.categories.find(c=>c.id===id)?.name || '—';
-  const rider = id => state.riders.find(r=>r.id===id);
-  const toast = msg => { const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); };
+  if (!state.events.length) state.events.push(ensureEvent(seedEvent));
+  const activeEvent = () => state.events.find(event => event.id === state.activeEventId) || state.events[0];
+  const setActiveEvent = (id, routeName = 'live') => {
+    if (!state.events.some(event => event.id === id)) return;
+    state.activeEventId = id; state.judgeState = {categoryId:'', riderIndex:0, run:1, values:{}}; state.speakerState = {categoryId:'', heat:1, riderIndex:0}; store.save(); location.hash = routeName;
+  };
+  const eventCategories = event => event.categories.slice().sort((a,b)=>(a.order || 0) - (b.order || 0));
+  const categoryName = (event, id) => event.categories.find(category => category.id === id)?.name || 'Bez kategorie';
+  const judgesFor = event => event.judges.filter(judge => ['judge','head_judge'].includes(judge.role));
+  const panel = event => event.panelIds.slice(0, event.judgeCount);
+  const ruleText = event => event.judgeCount === 5 ? '5 porotců • škrtá se minimum a maximum • průměr 3' : '3 porotci • průměr všech 3';
+  const heatCount = (event, category) => Math.max(1, Math.ceil(event.riders.filter(rider => rider.categoryId === category.id).length / Math.max(1, Number(category.heatSize) || 4)));
+  const categoryRange = category => {
+    if (category.minBirthYear != null && category.maxBirthYear != null) return `${category.minBirthYear}–${category.maxBirthYear}`;
+    if (category.minBirthYear != null) return `od ${category.minBirthYear}`;
+    if (category.maxBirthYear != null) return `do ${category.maxBirthYear}`;
+    return 'všechny ročníky';
+  };
+  const toast = message => { const element = $('#toast'); element.textContent = message; element.classList.add('show'); setTimeout(() => element.classList.remove('show'), 2400); };
   const save = () => store.save();
 
-  function route(){return (location.hash.slice(1).split('?')[0] || 'live').toLowerCase()}
-  function setActiveNav(){const r=route();$$('[data-route]').forEach(a=>a.classList.toggle('active',a.dataset.route===r));$('#mainNav')?.classList.remove('open')}
-  window.addEventListener('hashchange',render);
-  $('#navToggle').addEventListener('click',()=>$('#mainNav').classList.toggle('open'));
+  function route() { return (location.hash.slice(1).split('?')[0] || 'events').toLowerCase(); }
+  function setActiveNav() { const current = route(); $$('[data-route]').forEach(link => link.classList.toggle('active', link.dataset.route === current)); $('#mainNav')?.classList.remove('open'); }
+  window.addEventListener('hashchange', render);
+  $('#navToggle').addEventListener('click', () => $('#mainNav').classList.toggle('open'));
 
-  function layoutSide(content, active='dashboard'){
-    const user=state.currentUser || {name:'Demo Admin',role:'admin'};
-    return `<div class="app-shell">
-      <aside class="sidebar">
-        <div class="side-user"><b>${escapeHtml(user.name)}</b><small>${escapeHtml(user.role)}</small></div>
-        <div class="side-nav">
-          <button data-side="dashboard" class="${active==='dashboard'?'active':''}">Přehled</button>
-          <button data-side="riders" class="${active==='riders'?'active':''}">Jezdci</button>
-          <button data-side="categories" class="${active==='categories'?'active':''}">Kategorie</button>
-          <button data-side="judges" class="${active==='judges'?'active':''}">Rozhodčí</button>
-          <button data-side="settings" class="${active==='settings'?'active':''}">Scoring</button>
-          <button data-side="judge">Judge mode</button>
-          <button class="logout" data-action="logout">Odhlásit</button>
-        </div>
-      </aside>
-      <section class="content">${content}</section>
-    </div>`
+  function publicHero(title, subtitle) {
+    const event = activeEvent();
+    return `<section class="hero"><div><div class="eyebrow"><span class="live-dot"></span>SCOOT SCORING</div><h1>${title}</h1><p>${subtitle}</p></div><div class="hero-event"><small>Aktuální závod</small><h3>${escapeHtml(event.name)}</h3><div class="muted">${escapeHtml(dateLabel(event.date))}${event.location ? ` • ${escapeHtml(event.location)}` : ''}</div><div class="mt"><span class="pill ${statusClass(event.status)}">${escapeHtml(statusLabel(event.status))}</span></div>${event.info ? `<p class="event-info">${escapeHtml(event.info)}</p>` : ''}</div></section>`;
   }
-
-  function publicHero(title,sub){
-    return `<section class="hero"><div><div class="eyebrow"><span class="live-dot"></span>LIVE SCORING</div><h1>${title}</h1><p>${sub}</p></div><div class="hero-event"><small>Aktuální závod</small><h3>${escapeHtml(state.event.name)}</h3><div class="muted">${escapeHtml(state.event.date)} • ${escapeHtml(state.event.location)}</div><div class="mt"><span class="pill live">● Závod probíhá</span></div></div></section>`
+  function layoutSide(content, active = 'dashboard') {
+    const event = activeEvent(); const user = state.currentUser || {name:'Demo administrátor', role:'admin'};
+    return `<div class="app-shell"><aside class="sidebar"><div class="side-user"><b>${escapeHtml(user.name)}</b><small>${escapeHtml(user.role)}</small></div><div class="side-event"><label>Závod<select id="eventSwitcher" class="select">${state.events.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === event.id ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}</select></label></div><div class="side-nav"><button data-side="dashboard" class="${active === 'dashboard' ? 'active' : ''}">Přehled</button><button data-side="events" class="${active === 'events' ? 'active' : ''}">Závody</button><button data-side="riders" class="${active === 'riders' ? 'active' : ''}">Jezdci</button><button data-side="categories" class="${active === 'categories' ? 'active' : ''}">Kategorie</button><button data-side="heats" class="${active === 'heats' ? 'active' : ''}">Heaty</button><button data-side="judges" class="${active === 'judges' ? 'active' : ''}">Rozhodčí</button><button data-side="settings" class="${active === 'settings' ? 'active' : ''}">Scoring</button><button data-side="judge" class="${active === 'judge' ? 'active' : ''}">Judge mode</button><button data-side="speaker" class="${active === 'speaker' ? 'active' : ''}">Speaker</button><button class="logout" data-action="logout">Odhlásit</button></div></aside><section class="content">${content}</section></div>`;
   }
+  function adminHeader(title, subtitle, actions = '') { return `<div class="content-head"><div><h1>${title}</h1><p>${subtitle}</p></div><div class="toolbar">${actions}</div></div>`; }
 
-  function leaderboard(categoryId='c2'){
-    const rows=state.riders.filter(r=>r.categoryId===categoryId).map(r=>{
-      const result=window.ScootScoring.riderResult(state.scores.filter(s=>s.riderId===r.id && s.categoryId===categoryId),panel());
-      return {...r,...result,best:result.total};
-    }).sort((a,b)=>(b.best??-1)-(a.best??-1) || a.bib-b.bib);
-    rows.forEach((r,i)=>r.rank=r.best===null ? null : (i && rows[i-1].best===r.best ? rows[i-1].rank : i+1));
+  function renderEvents() {
+    const cards = state.events.slice().sort((a,b) => String(a.date).localeCompare(String(b.date))).map(event => `<article class="card event-card"><div class="event-card-top"><span class="pill ${statusClass(event.status)}">${escapeHtml(statusLabel(event.status))}</span><span class="muted">${escapeHtml(dateLabel(event.date))}</span></div><h2>${escapeHtml(event.name)}</h2><p class="muted">${escapeHtml(event.location || 'Místo bude doplněno')}</p>${event.info ? `<p>${escapeHtml(event.info)}</p>` : ''}<div class="event-card-meta"><span>${event.riders.length} jezdců</span><span>${event.categories.length} kategorií</span><span>${event.judgeCount} porotci</span></div><div class="toolbar"><button class="btn btn-primary" data-open-event="${escapeHtml(event.id)}">Otevřít závod</button></div></article>`).join('');
+    app.innerHTML = publicHero('Závody.', 'Každý závod má vlastní datum, informace, porotu, kategorie, heaty a výsledky.') + `<div class="section-title"><div><h2>Kalendář závodů</h2><p>Vyber závod, který chceš zobrazit.</p></div><span class="pill">${state.events.length} závodů</span></div><div class="event-grid">${cards || '<div class="card empty">Zatím není vytvořený žádný závod.</div>'}</div>`;
+    $$('[data-open-event]').forEach(button => button.onclick = () => setActiveEvent(button.dataset.openEvent, 'live'));
+  }
+  function resultFor(event, rider) { return window.ScootScoring.riderResult(event.scores.filter(score => score.riderId === rider.id), panel(event), event.runCount); }
+  function leaderboard(event, categoryId) {
+    const rows = event.riders.filter(rider => rider.categoryId === categoryId).map(rider => ({...rider, ...resultFor(event, rider)})).sort((a,b) => (b.total ?? -1) - (a.total ?? -1) || a.bib - b.bib);
+    rows.forEach((row, index) => { row.rank = row.total == null ? null : (index && rows[index - 1].total === row.total ? rows[index - 1].rank : index + 1); });
     return rows;
   }
+  function renderLive() {
+    const event = activeEvent(); const categories = eventCategories(event); const selected = sessionStorage.getItem(`liveCat:${event.id}`) || categories[0]?.id || '';
+    const rows = selected ? leaderboard(event, selected) : [];
+    app.innerHTML = publicHero('Výsledky závodu.', 'U každého porotce se použije lepší jízda. Výsledek čeká na kompletní hodnocení panelu.') + `<div class="section-title"><div><h2>Live leaderboard</h2><p>${escapeHtml(ruleText(event))} • ${event.runCount} ${event.runCount === 1 ? 'jízda' : 'jízdy'}</p></div><span class="pill">${DEMO ? 'DEMO' : 'ONLINE'}</span></div><div class="toolbar"><div class="tabs">${categories.map(category => `<button class="tab ${category.id === selected ? 'active' : ''}" data-live-cat="${escapeHtml(category.id)}">${escapeHtml(category.name)}</button>`).join('')}</div><button class="btn btn-outline" data-action="export-results">Export CSV</button></div><div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Jezdec</th>${panel(event).map((id,index) => `<th title="${escapeHtml(event.judges.find(judge => judge.id === id)?.name || '')}">Porotce ${index + 1}</th>`).join('')}<th>Výsledek</th></tr></thead><tbody>${rows.map(row => `<tr><td class="rank">${row.rank ?? '—'}</td><td><div class="rider-name">${escapeHtml(row.name)}</div><div class="rider-meta">#${row.bib} • ${row.birthYear || 'rok neuveden'}${row.heat ? ` • Heat ${row.heat}` : ''}</div></td>${row.marks.map((value,index) => `<td class="score">${value == null ? '—' : row.dropped.includes(index) ? `<del title="Škrtnutá známka">${value.toFixed(2)}</del>` : value.toFixed(2)}</td>`).join('')}<td class="score score-best">${row.total == null ? `<span class="help">Čeká ${row.received}/${event.judgeCount}</span>` : row.total.toFixed(2)}</td></tr>`).join('') || `<tr><td colspan="${panel(event).length + 3}" class="empty">Zatím bez výsledků.</td></tr>`}</tbody></table></div><p class="help">Přeškrtnuté známky se nepočítají. Při shodě se pořadí sdílí.</p>`;
+    $$('[data-live-cat]').forEach(button => button.onclick = () => { sessionStorage.setItem(`liveCat:${event.id}`, button.dataset.liveCat); renderLive(); });
+    $('[data-action="export-results"]')?.addEventListener('click', () => exportResults(event, selected));
+Warning: truncated output (original token count: 8041)
+Total output lines: 100
 
-  function renderLive(){
-    const selected=sessionStorage.getItem('liveCat') || 'c2';
-    app.innerHTML=publicHero('Výsledky závodu.','U každého porotce se vybírá lepší ze dvou jízd. Výsledek čeká na známku od celé poroty.')+`
-      <div class="section-title"><div><h2>Výsledky</h2><p>${ruleText()}</p></div><span class="pill">${DEMO?'DEMO • tento prohlížeč':'Scoring'}</span></div>
-      <div class="toolbar"><div class="tabs">${state.categories.map(c=>`<button class="tab ${selected===c.id?'active':''}" data-live-cat="${c.id}">${escapeHtml(c.name)}</button>`).join('')}</div><button class="btn btn-outline" data-action="export-results">Export CSV</button></div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Jezdec</th>${panel().map((id,i)=>`<th title="${escapeHtml(state.judges.find(j=>j.id===id)?.name||'')}">Porotce ${i+1}</th>`).join('')}<th>Výsledek</th></tr></thead><tbody>
-      ${leaderboard(selected).map(r=>`<tr><td class="rank">${r.rank??'—'}</td><td><div class="rider-name">${escapeHtml(r.name)}</div><div class="rider-meta">#${r.bib}</div></td>${r.marks.map((v,i)=>`<td class="score">${v===null?'—':r.dropped.includes(i)?`<del title="Škrtnutá známka">${v.toFixed(2)}</del>`:v.toFixed(2)}</td>`).join('')}<td class="score score-best">${r.best===null?`<span class="help">Čeká ${r.received}/${state.event.judgeCount}</span>`:r.best.toFixed(2)}</td></tr>`).join('') || `<tr><td colspan="${panel().length+3}" class="empty">Zatím bez výsledků.</td></tr>`}
-      </tbody></table></div><p class="help">Přeškrtnuté známky se nepočítají. Při shodě se škrtá vždy jen jedna nejnižší a jedna nejvyšší známka. Shodné výsledky sdílejí pořadí.</p>`;
-    $$('[data-live-cat]').forEach(b=>b.onclick=()=>{sessionStorage.setItem('liveCat',b.dataset.liveCat);renderLive()});
-    $('[data-action="export-results"]')?.addEventListener('click',()=>exportResults(selected));
   }
-
-  function renderStartlist(){
-    const selected=sessionStorage.getItem('startCat')||'c2';
-    const list=state.riders.filter(r=>r.categoryId===selected).sort((a,b)=>a.bib-b.bib);
-    app.innerHTML=publicHero('Startovní listina.','Přehled přihlášených jezdců, startovních čísel a kategorií. Admin může pořadí kdykoliv upravit.')+`
-      <div class="section-title"><div><h2>Startovka</h2><p>${list.length} jezdců v kategorii ${escapeHtml(catName(selected))}</p></div></div>
-      <div class="toolbar"><div class="tabs">${state.categories.map(c=>`<button class="tab ${selected===c.id?'active':''}" data-start-cat="${c.id}">${escapeHtml(c.name)}</button>`).join('')}</div></div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Jezdec</th><th>Město</th><th>Sponzoři</th><th>Stav</th></tr></thead><tbody>${list.map(r=>`<tr><td class="score">${r.bib}</td><td class="rider-name">${escapeHtml(r.name)}</td><td>${escapeHtml(r.city)}</td><td>${escapeHtml(r.sponsors||'—')}</td><td><span class="pill ${r.status==='checked-in'?'live':'warn'}">${r.status==='checked-in'?'Prezentován':'Přihlášen'}</span></td></tr>`).join('')}</tbody></table></div>`;
-    $$('[data-start-cat]').forEach(b=>b.onclick=()=>{sessionStorage.setItem('startCat',b.dataset.startCat);renderStartlist()});
+  function renderStartlist() {
+    const event = activeEvent(); const categories = eventCategories(event); const selected = sessionStorage.getItem(`startCat:${event.id}`) || categories[0]?.id || '';
+    const list = event.riders.filter(rider => rider.categoryId === selected).sort((a,b) => (a.heat || 999) - (b.heat || 999) || a.bib - b.bib);
+    app.innerHTML = publicHero('Startovní listina.', 'Přehled jezdců, ročníků, kategorií a ručně připravených heatů.') + `<div class="section-title"><div><h2>Startovka</h2><p>${list.length} jezdců • ${escapeHtml(categoryName(event, selected))}</p></div></div><div class="toolbar"><div class="tabs">${categories.map(category => `<button class="tab ${category.id === selected ? 'active' : ''}" data-start-cat="${escapeHtml(category.id)}">${escapeHtml(category.name)}</button>`).join('')}</div></div><div class="table-wrap"><table class="table"><thead><tr><th>Pořadí</th><th>#</th><th>Jezdec</th><th>Ročník</th><th>Heat</th><th>Stav</th></tr></thead><tbody>${list.map((rider,index) => `<tr><td>${index + 1}</td><td class="score">${rider.bib}</td><td class="rider-name">${escapeHtml(rider.name)}</td><td>${rider.birthYear || '—'}</td><td><span class="pill">${rider.heat ? `Heat ${rider.heat}` : 'Nepřiřazen'}</span></td><td><span class="pill ${rider.status === 'checked-in' ? 'live' : 'warn'}">${rider.status === 'checked-in' ? 'Prezentován' : 'Přihlášen'}</span></td></tr>`).join('')}</tbody></table></div>`;
+    $$('[data-start-cat]').forEach(button => button.onclick = () => { sessionStorage.setItem(`startCat:${event.id}`, button.dataset.startCat); renderStartlist(); });
   }
-
-  function renderRegistration(){
-    app.innerHTML=`<div class="registration-shell"><div class="card"><div class="registration-head"><div><div class="eyebrow">ONLINE PŘIHLÁŠKA</div><h1>${escapeHtml(state.event.name)}</h1><p class="muted">Jeden formulář → jezdec se rovnou objeví v administraci a ve startovní listině.</p></div><span class="pill">${escapeHtml(state.event.date)}</span></div>
-      <form id="registrationForm" class="form-grid">
-        <div class="field full"><label>Jméno a příjmení *</label><input class="input" name="name" required placeholder="Jan Novák"></div>
-        <div class="field"><label>Kategorie *</label><select class="select" name="categoryId" required>${state.categories.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
-        <div class="field"><label>Datum narození *</label><input class="input" type="date" name="birth" required></div>
-        <div class="field"><label>Město</label><input class="input" name="city" placeholder="Pardubice"></div>
-        <div class="field"><label>Instagram</label><input class="input" name="instagram" placeholder="@username"></div>
-        <div class="field full"><label>Sponzoři</label><input class="input" name="sponsors" placeholder="Divine, Scootshop..."></div>
-        <div class="field full"><label>Informace o jezdci</label><textarea class="textarea" rows="4" name="bio" placeholder="Krátké info pro speakera..."></textarea></div>
-        <div class="field full"><button class="btn btn-primary" type="submit">Odeslat přihlášku</button><div class="help">V ostré verzi doplníme GDPR souhlas a kontaktní údaje rodiče podle věku jezdce.</div></div>
-      </form></div></div>`;
-    $('#registrationForm').onsubmit=async e=>{
-      e.preventDefault();const f=new FormData(e.currentTarget);const obj=Object.fromEntries(f.entries());
-      const maxBib=Math.max(0,...state.riders.map(r=>+r.bib||0));
-      const newR={id:uid('r'),bib:maxBib+1,name:obj.name,categoryId:obj.categoryId,birth:obj.birth,city:obj.city||'',instagram:obj.instagram||'',sponsors:obj.sponsors||'',bio:obj.bio||'',status:'registered'};
-      if(!DEMO && sb){
-        const {error}=await sb.from('registrations_public').insert({event_slug:state.event.slug,...newR});
-        if(error){toast('Nepodařilo se uložit: '+error.message);return;}
-      } else {state.riders.push(newR);save();}
-      e.currentTarget.innerHTML='<div class="success"><b>Přihláška je uložená.</b><br>Startovní číslo: #'+newR.bib+'. Jezdec je připravený k prezenci.</div>';
+  function renderRegistration() {
+    const event = activeEvent();
+    app.innerHTML = `<div class="registration-shell"><div class="card"><div class="registration-head"><div><div class="eyebrow">PŘIHLÁŠKA NA ZÁVOD</div><h1>${escapeHtml(event.name)}</h1><p class="muted">Kategorie se přidělí automaticky podle roku narození.</p></div><span class="pill">${escapeHtml(dateLabel(event.date))}</span></div><form id="registrationForm" class="form-grid"><div class="field full"><label>Jméno a příjmení *</label><input class="input" name="name" required placeholder="Jan Novák"></div><div class="field"><label>Rok narození *</label><input class="input" type="number" name="birthYear" min="1900" max="${yearNow + 1}" required placeholder="2012"></div><div class="field"><label>Město</label><input class="input" name="city" placeholder="Pardubice"></div><div class="field"><label>Instagram</label><input class="input" name="instagram" placeholder="@username"></div><div class="field full"><label>Sponzoři</label><input class="input" name="sponsors" placeholder="Divine, Scootshop..."></div><div class="field full"><label>Informace pro speakera</label><textarea class="textarea" rows="4" name="bio" placeholder="Krátké info o jezdci..."></textarea></div><div class="field full"><button class="btn btn-primary" type="submit">Odeslat přihlášku</button><div class="help">Zařazení: ${eventCategories(event).map(category => `${escapeHtml(category.name)} (${escapeHtml(categoryRange(category))})`).join(' • ') || 'kategorie zatím nejsou nastavené'}</div></div></form></div></div>`;
+    $('#registrationForm').onsubmit = async formEvent => {
+      formEvent.preventDefault(); const values = Object.fromEntries(new FormData(formEvent.currentTarget)); const birthYear = parseYear(values.birthYear);
+      if (!birthYear) { toast('Zadej platný rok narození.'); return; }
+      const maxBib = Math.max(0, ...event.riders.map(rider => Number(rider.bib) || 0));
+      const rider = {id:uid('rider'), registrationOrder:event.riders.length + 1, bib:maxBib + 1, name:String(values.name).trim(), birthYear, city:values.city || '', instagram:values.instagram || '', sponsors:values.sponsors || '', bio:values.bio || '', status:'registered'};
+      assignCategory(event, rider); event.riders.push(rider); save();
+      formEvent.currentTarget.innerHTML = `<div class="success"><b>Přihláška je uložená.</b><br>Startovní číslo: #${rider.bib}. ${rider.categoryId ? `Automatické zařazení: ${escapeHtml(categoryName(event, rider.categoryId))}.` : 'Kategorie zatím nebyla nalezena.'}</div>`;
     };
   }
 
-  function renderLogin(){
-    app.innerHTML=`<div class="login-shell"><div class="card"><div class="eyebrow">STAFF LOGIN</div><h1>Přihlášení</h1><p class="muted">Admin a rozhodčí se přihlásí Google účtem. Diváci a riders login nepotřebují.</p><div class="mt"><button id="googleLogin" class="google-btn"><b>G</b> Pokračovat přes Google</button></div>${DEMO?`<div class="section-title"><div><h3>Demo přístup</h3><p>Pro vyzkoušení bez databáze</p></div></div><div class="demo-logins"><button class="btn btn-outline" data-demo-role="admin">Admin</button><button class="btn btn-outline" data-demo-role="judge">Rozhodčí</button></div>`:''}<div class="help mt">Role se po prvním přihlášení nastaví v administraci.</div></div></div>`;
-    $('#googleLogin').onclick=async()=>{
-      if(!sb){toast('Nejdřív doplň Supabase URL a klíč do config.js.');return;}
-      const {error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+'/#auth'}});if(error)toast(error.message);
-    };
-    $$('[data-demo-role]').forEach(b=>b.onclick=()=>{const role=b.dataset.demoRole;state.currentUser=role==='admin'?{name:'Demo administrátor',role:'admin',email:'admin@example.invalid'}:{name:'Demo rozhodčí 1',role:'judge',email:'judge1@example.invalid'};save();location.hash=role==='admin'?'admin':'judge'});
+  function adminDashboard() {
+    const event = activeEvent(); const content = adminHeader('Přehled závodu', 'Nastavení a stav aktuálního závodu.', `<button class="btn btn-outline" data-action="edit-event">Upravit závod</button><button class="btn btn-primary" data-action="new-event">+ Nový závod</button>`) + `<div class="card event-summary"><div><span class="pill ${statusClass(event.status)}">${escapeHtml(statusLabel(event.status))}</span><h2>${escapeHtml(event.name)}</h2><p>${escapeHtml(dateLabel(event.date))}${event.location ? ` • ${escapeHtml(event.location)}` : ''}</p>${event.info ? `<p class="muted">${escapeHtml(event.info)}</p>` : ''}</div><div class="event-summary-meta"><b>${event.judgeCount}</b><span>porotci</span><b>${event.runCount}</b><span>${event.runCount === 1 ? 'jízda' : 'jízdy'}</span></div></div><div class="grid grid-4"><div class="card stat"><span>Jezdci</span><strong>${event.riders.length}</strong></div><div class="card stat"><span>Kategorie</span><strong>${event.categories.length}</strong></div><div class="card stat"><span>Heaty</span><strong>${event.categories.reduce((sum, category) => sum + heatCount(event, category), 0)}</strong></div><div class="card stat"><span>Hodnocení</span><strong>${event.scores.length}</strong></div></div><div class="section-title"><div><h2>Kategorie</h2><p>Zařazení podle roku narození.</p></div></div><div class="grid grid-2">${eventCategories(event).map(category => `<div class="card"><div class="event-card-top"><h3>${escapeHtml(category.name)}</h3><span class="pill">${escapeHtml(categoryRange(category))}</span></div><p class="muted">${event.riders.filter(rider => rider.categoryId === category.id).length} jezdců • ${heatCount(event, category)} heaty po ${category.heatSize}</p></div>`).join('') || '<div class="card empty">Přidej první kategorii.</div>'}</div>`;
+    app.innerHTML = layoutSide(content, 'dashboard'); bindAdminCommon();
+    $('[data-action="new-event"]').onclick = () => openEventForm(); $('[data-action="edit-event"]').onclick = () => openEventForm(event.id);
+  }
+  function adminEvents() {
+    const content = adminHeader('Závody', 'Vytvoř samostatný závod a nastav ho podle jeho potřeb.', `<button class="btn btn-primary" data-action="new-event">+ Nový závod</button>`) + `<div class="event-grid admin-event-grid">${state.events.map(event => `<article class="card event-card ${event.id === activeEvent().id ? 'selected' : ''}"><div class="event-card-top"><span class="pill ${statusClass(event.status)}">${escapeHtml(statusLabel(event.status))}</span><span>${escapeHtml(dateLabel(event.date))}</span></div><h2>${escapeHtml(event.name)}</h2><p class="muted">${escapeHtml(event.location || 'Místo není nastavené')}</p><p>${escapeHtml(event.info || 'Bez popisu')}</p><div class="event-card-meta"><span>${event.judgeCount} porotci</span><span>${event.runCount} ${event.runCount === 1 ? 'jízda' : 'jízdy'}</span><span>${event.riders.length} jezdců</span></div><div class="toolbar"><button class="btn btn-primary" data-select-admin-event="${escapeHtml(event.id)}">${event.id === activeEvent().id ? 'Aktivní závod' : 'Otevřít'}</button><button class="btn btn-outline" data-edit-event-id="${escapeHtml(event.id)}">Upravit</button>${state.events.length > 1 ? `<button class="btn btn-danger" data-delete-event="${escapeHtml(event.id)}">Smazat</button>` : ''}</div></article>`).join('')}</div>`;
+    app.innerHTML = layoutSide(content, 'events'); bindAdminCommon(); $('[data-action="new-event"]').onclick = () => openEventForm();
+    $$('[data-select-admin-event]').forEach(button => button.onclick = () => setActiveEvent(button.dataset.selectAdminEvent, 'admin'));
+    $$('[data-edit-event-id]').forEach(button => button.onclick = () => openEventForm(button.dataset.editEventId));
+    $$('[data-delete-event]').forEach(button => button.onclick = () => { const event = state.events.find(item => item.id === button.dataset.deleteEvent); if (!event || !confirm(`Smazat závod „${event.name}“?`)) return; state.events = state.events.filter(item => item.id !== event.id); if (state.activeEventId === event.id) state.activeEventId = state.events[0].id; save(); adminEvents(); });
+  }
+  function adminRiders() {
+    const event = activeEvent(); const content = adminHeader('Jezdci', 'Přihlášky, automatické zařazení podle ročníku a prezence.', `<button class="btn btn-outline" data-action="reassign">Přerozdělit podle ročníku</button><button class="btn btn-outline" data-action="import-csv">Import CSV</button><button class="btn btn-primary" data-action="add-rider">+ Přidat jezdce</button>`) + `<div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Jezdec</th><th>Ročník</th><th>Kategorie</th><th>Heat</th><th>Stav</th></tr></thead><tbody>${event.riders.slice().sort((a,b) => a.bib - b.bib).map(rider => `<tr><td class="score">${rider.bib}</td><td><div class="rider-name">${escapeHtml(rider.name)}</div><div class="rider-meta">${escapeHtml(rider.city || '')}</div></td><td>${rider.birthYear || '—'}</td><td><span class="pill">${escapeHtml(categoryName(event, rider.categoryId))}</span></td><td>${rider.heat ? `Heat ${rider.heat}` : '—'}</td><td><button class="btn btn-small ${rider.status === 'checked-in' ? 'btn-primary' : 'btn-outline'}" data-checkin="${escapeHtml(rider.id)}">${rider.status === 'checked-in' ? 'Prezentován' : 'Prezentovat'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    app.innerHTML = layoutSide(content, 'riders'); bindAdminCommon();
+    $$('[data-checkin]').forEach(button => button.onclick = () => { const rider = event.riders.find(item => item.id === button.dataset.checkin); if (rider) rider.status = rider.status === 'checked-in' ? 'registered' : 'checked-in'; save(); adminRiders(); });
+    $('[data-action="reassign"]').onclick = () => { event.riders.forEach(rider => assignCategory(event, rider)); save(); toast('Jezdci byli zařazeni podle ročníku.'); adminRiders(); };
+    $('[data-action="add-rider"]').onclick = () => openRiderForm(); $('[data-action="import-csv"]').onclick = openCsvImport;
+  }
+  function rangesOverlap(first, second) {
+    return (first.minBirthYear == null || second.maxBirthYear == null || first.minBirthYear <= second.maxBirthYear) && (second.minBirthYear == null || first.maxBirthYear == null || second.minBirthYear <= first.maxBirthYear);
+  }
+  function adminCategories() {
+    const event = activeEvent(); const content = adminHeader('Kategorie', 'Každá kategorie má rozsah ročníků a velikost heatů.', `<button class="btn btn-primary" data-action="add-category">+ Kategorie</button>`) + `<div class="grid grid-2">${eventCategories(event).map(category => `<div class="card category-card"><div class="event-card-top"><div><h2>${escapeHtml(category.name)}</h2><p class="muted">Ročníky: ${escapeHtml(categoryRange(category))}</p></div><div class="toolbar"><button class="icon-btn" data-edit-category="${escapeHtml(category.id)}">✎</button><button class="icon-btn danger-icon" data-delete-category="${escapeHtml(category.id)}">⌫</button></div></div><div class="grid grid-3 mt"><div><span class="muted">Jezdci</span><div class="score">${event.riders.filter(rider => rider.categoryId === category.id).length}</div></div><div><span class="muted">Jezdců / heat</span><div class="score">${category.heatSize}</div></div><div><span class="muted">Heaty</span><div class="score">${heatCount(event, category)}</div></div></div></div>`).join('') || '<div class="card empty">Zatím nejsou žádné kategorie.</div>'}</div><div class="card mt"><h3>Jak nastavit věk</h3><p class="muted">Pro „+14 let“ nastav do roku 2012. Pro „-14 let“ nastav od roku 2013. Další kategorie musí mít vlastní rozsah, nap…2041 tokens truncated…$('#judgeCount').onchange = drawSeats;
+    $('#panelForm').onsubmit = formEvent => { formEvent.preventDefault(); const ids = $$('[data-panel-seat]').map(select => select.value); const count = Number($('#judgeCount').value); if (![3,5].includes(count) || ids.length !== count || ids.some(id => !id) || new Set(ids).size !== count) { toast('Vyber různé porotce pro všechna místa.'); return; } event.judgeCount = count; event.panelIds = ids; state.judgeState.values = {}; save(); toast('Porota uložena, výsledky přepočítány.'); adminSettings(); };
   }
 
-  function adminHeader(title,sub,actions=''){return `<div class="content-head"><div><h1>${title}</h1><p>${sub}</p></div><div class="toolbar">${actions}</div></div>`}
-
-  function adminDashboard(){
-    const content=adminHeader('Přehled závodu','Všechno důležité na jednom místě.',`<button class="btn btn-primary" data-admin-action="open-judge">Spustit scoring</button>`)+`
-      <div class="grid grid-4"><div class="card stat"><span>Jezdci</span><strong>${state.riders.length}</strong></div><div class="card stat"><span>Kategorie</span><strong>${state.categories.length}</strong></div><div class="card stat"><span>Rozhodčí</span><strong>${state.judges.filter(j=>j.role==='judge').length}</strong></div><div class="card stat"><span>Odeslané scores</span><strong>${state.scores.filter(s=>s.submitted).length}</strong></div></div>
-      <div class="section-title"><div><h2>Kategorie</h2><p>Stav závodu a počty jezdců</p></div></div>
-      <div class="grid grid-2">${state.categories.map(c=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:16px"><div><span class="pill live">LIVE</span><h2 style="font:700 32px 'Space Grotesk';margin:12px 0 3px">${escapeHtml(c.name)}</h2><span class="muted">${state.riders.filter(r=>r.categoryId===c.id).length} jezdců • ${c.runs} runy</span></div><div class="right"><div class="muted">Postup</div><div class="score">TOP ${c.advance}</div></div></div><div class="progress"><span style="width:${Math.min(100,state.scores.filter(s=>s.categoryId===c.id).length/Math.max(1,state.riders.filter(r=>r.categoryId===c.id).length*c.runs)*100)}%"></span></div></div>`).join('')}</div>`;
-    app.innerHTML=layoutSide(content,'dashboard');bindAdminCommon();$('[data-admin-action="open-judge"]')?.addEventListener('click',()=>location.hash='judge');
+  function judgeRiders(event) { return event.riders.filter(rider => rider.categoryId === state.judgeState.categoryId && rider.status === 'checked-in'); }
+  function currentJudgeId(event) { return DEMO ? (state.judgeState.judgeId || panel(event)[0]) : state.currentUser?.id; }
+  function scoreTotal(event, values) { return +event.scoring.reduce((sum, criterion) => sum + (Number(values[criterion.key]) || 0) * criterion.weight, 0).toFixed(1); }
+  function renderJudge() {
+    const event = activeEvent(); const categories = eventCategories(event); if (!state.judgeState.categoryId || !event.categories.some(category => category.id === state.judgeState.categoryId)) state.judgeState.categoryId = categories[0]?.id || '';
+    const list = judgeRiders(event); const index = Math.min(state.judgeState.riderIndex || 0, Math.max(list.length - 1, 0)); const rider = list[index]; const judgeId = currentJudgeId(event); const savedScore = rider && event.scores.find(score => score.riderId === rider.id && score.judgeId === judgeId && score.run === state.judgeState.run);
+    if (!state.judgeState.values || Object.keys(state.judgeState.values).length === 0) state.judgeState.values = savedScore?.values ? {...savedScore.values} : Object.fromEntries(event.scoring.map(criterion => [criterion.key, 0]));
+    const values = state.judgeState.values; const total = scoreTotal(event, values); const maximum = event.scoring.reduce((sum, criterion) => sum + criterion.max * criterion.weight, 0); const actions = DEMO ? `<label>Demo porotce<select id="demoJudge" class="select">${panel(event).map(id => `<option value="${escapeHtml(id)}" ${id === judgeId ? 'selected' : ''}>${escapeHtml(event.judges.find(judge => judge.id === id)?.name || id)}</option>`).join('')}</select></label>` : '';
+    const content = adminHeader('Judge mode', `Hodnocení pro ${escapeHtml(event.name)} • ${escapeHtml(ruleText(event))}`, `${actions}<select id="judgeCat" class="select">${categories.map(category => `<option value="${escapeHtml(category.id)}" ${category.id === state.judgeState.categoryId ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}</select>`) + (rider ? `<div class="judge-grid"><div class="card"><div class="current-rider"><div style="display:flex;gap:14px;align-items:center"><div class="bib">${rider.bib}</div><div><div class="eyebrow">JÍZDA ${state.judgeState.run} / ${event.runCount}</div><h2>${escapeHtml(rider.name)}</h2><div class="muted">${rider.birthYear || '—'} • ${escapeHtml(categoryName(event, rider.categoryId))}${rider.heat ? ` • Heat ${rider.heat}` : ''}</div></div></div><span class="pill">${index + 1} / ${list.length}</span></div>${event.scoring.map(criterion => `<div class="criterion"><div class="criterion-head"><div><b>${escapeHtml(criterion.label)}</b><div class="help">${escapeHtml(criterion.desc || '')}</div></div><span class="criterion-score" data-score-label="${escapeHtml(criterion.key)}">${(Number(values[criterion.key]) || 0).toFixed(1)}</span></div><input class="range" type="range" min="0" max="${criterion.max}" step="0.1" value="${Number(values[criterion.key]) || 0}" data-criterion="${escapeHtml(criterion.key)}"></div>`).join('')}</div><aside class="card total-box"><div class="eyebrow">CELKOVÉ SKÓRE</div><div class="big-total" id="judgeTotal">${total.toFixed(1)}</div><div class="total-max">z ${maximum}</div><div class="progress"><span id="judgeProgress" style="width:${maximum ? total / maximum * 100 : 0}%"></span></div><div class="total-actions"><button class="btn btn-primary" data-action="submit-score">Odeslat score</button><button class="btn btn-outline" data-action="reset-score">Vynulovat</button><div class="grid grid-2"><button class="btn btn-outline" data-action="prev-rider">← Předchozí</button><button class="btn btn-outline" data-action="next-rider">Další →</button></div><div class="tabs" style="width:100%;justify-content:center">${Array.from({length:event.runCount}, (_,runIndex) => `<button class="tab ${state.judgeState.run === runIndex + 1 ? 'active' : ''}" data-run="${runIndex + 1}">Jízda ${runIndex + 1}</button>`).join('')}</div></div><div class="judge-history"><b>Uložené známky</b>${event.scores.filter(score => score.riderId === rider.id).map(score => `<div class="history-row"><span>Jízda ${score.run} • ${escapeHtml(score.judge || score.judgeId)}</span><b>${Number(score.total).toFixed(1)}</b></div>`).join('') || '<span class="muted">Zatím nic.</span>'}</div></aside></div>` : `<div class="card empty">V této kategorii není prezentovaný jezdec.</div>`);
+    app.innerHTML = layoutSide(content, 'judge'); bindAdminCommon();
+    $('#demoJudge')?.addEventListener('change', eventTarget => { state.judgeState.judgeId = eventTarget.target.value; state.judgeState.values = {}; save(); renderJudge(); });
+    $('#judgeCat')?.addEventListener('change', eventTarget => { state.judgeState.categoryId = eventTarget.target.value; state.judgeState.riderIndex = 0; state.judgeState.values = {}; save(); renderJudge(); });
+    $$('[data-criterion]').forEach(input => input.oninput = () => { state.judgeState.values[input.dataset.criterion] = Number(input.value); const next = scoreTotal(event, state.judgeState.values); $(`[data-score-label="${input.dataset.criterion}"]`).textContent = Number(input.value).toFixed(1); $('#judgeTotal').textContent = next.toFixed(1); $('#judgeProgress').style.width = `${maximum ? next / maximum * 100 : 0}%`; save(); });
+    $$('[data-run]').forEach(button => button.onclick = () => { state.judgeState.run = Number(button.dataset.run); state.judgeState.values = {}; save(); renderJudge(); });
+    $('[data-action="reset-score"]')?.addEventListener('click', () => { state.judgeState.values = {}; save(); renderJudge(); });
+    $('[data-action="prev-rider"]')?.addEventListener('click', () => { state.judgeState.riderIndex = Math.max(0, index - 1); state.judgeState.values = {}; save(); renderJudge(); });
+    $('[data-action="next-rider"]')?.addEventListener('click', () => { state.judgeState.riderIndex = Math.min(Math.max(list.length - 1, 0), index + 1); state.judgeState.values = {}; save(); renderJudge(); });
+    $('[data-action="submit-score"]')?.addEventListener('click', () => { if (!rider || !panel(event).includes(judgeId)) { toast('Tento účet není přiřazen do panelu.'); return; } const valuesToSave = Object.fromEntries(event.scoring.map(criterion => [criterion.key, Number(state.judgeState.values[criterion.key] || 0)])); if (event.scoring.some(criterion => valuesToSave[criterion.key] < 0 || valuesToSave[criterion.key] > criterion.max)) { toast('Body jsou mimo povolený rozsah.'); return; } const score = {id:uid('score'), riderId:rider.id, categoryId:rider.categoryId, run:state.judgeState.run, judgeId, judge:event.judges.find(item => item.id === judgeId)?.name || 'Porotce', values:valuesToSave, total:scoreTotal(event, valuesToSave), submitted:true}; event.scores = event.scores.filter(item => !(item.riderId === rider.id && item.judgeId === judgeId && item.run === state.judgeState.run)); event.scores.push(score); state.judgeState.values = {}; state.judgeState.riderIndex = Math.min(Math.max(list.length - 1, 0), index + 1); save(); toast('Score uložen.'); renderJudge(); });
+  }
+  function speakerRiders(event) { return event.riders.filter(rider => rider.categoryId === state.speakerState.categoryId && (!state.speakerState.heat || Number(rider.heat) === Number(state.speakerState.heat))).sort((a,b) => a.bib - b.bib); }
+  function renderSpeaker() {
+    const event = activeEvent(); const categories = eventCategories(event); if (!state.speakerState.categoryId || !event.categories.some(category => category.id === state.speakerState.categoryId)) state.speakerState.categoryId = categories[0]?.id || '';
+    const category = event.categories.find(item => item.id === state.speakerState.categoryId); const maxHeat = category ? Math.max(heatCount(event, category), ...event.riders.filter(rider => rider.categoryId === category.id).map(rider => Number(rider.heat) || 0)) : 1; if (!state.speakerState.heat) state.speakerState.heat = 1; const list = speakerRiders(event); const index = Math.min(state.speakerState.riderIndex || 0, Math.max(list.length - 1, 0)); const rider = list[index];
+    const content = adminHeader('Speaker mode', 'Startovní listina s informacemi pro uvádění jezdců.', `<select id="speakerCat" class="select">${categories.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === state.speakerState.categoryId ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}</select><select id="speakerHeat" class="select"><option value="0">Všechny heaty</option>${Array.from({length:maxHeat}, (_,heatIndex) => `<option value="${heatIndex + 1}" ${Number(state.speakerState.heat) === heatIndex + 1 ? 'selected' : ''}>Heat ${heatIndex + 1}</option>`).join('')}</select>`) + (rider ? `<div class="speaker-layout"><div class="card speaker-card"><div class="current-rider"><div style="display:flex;gap:14px;align-items:center"><div class="bib">${rider.bib}</div><div><div class="eyebrow">HEAT ${rider.heat || '—'}</div><h2>${escapeHtml(rider.name)}</h2><div class="muted">${rider.birthYear || '—'} • ${escapeHtml(categoryName(event, rider.categoryId))}</div></div></div><span class="pill">${index + 1} / ${list.length}</span></div><div class="speaker-facts"><div><span>Bydliště</span><b>${escapeHtml(rider.city || '—')}</b></div><div><span>Sponzoři</span><b>${escapeHtml(rider.sponsors || '—')}</b></div><div><span>Instagram</span><b>${escapeHtml(rider.instagram || '—')}</b></div></div><div class="speaker-bio"><span>Info pro speakera</span><p>${escapeHtml(rider.bio || 'Informace zatím nejsou vyplněné.')}</p></div><div class="grid grid-2 mt"><button class="btn btn-outline" data-speaker-prev>← Předchozí</button><button class="btn btn-primary" data-speaker-next>Další →</button></div></div><aside class="card"><h3>Startovka heat ${state.speakerState.heat || 'všech'}</h3>${list.map((item,itemIndex) => `<button class="speaker-list-row ${item.id === rider.id ? 'active' : ''}" data-speaker-index="${itemIndex}"><b>#${item.bib}</b><span>${escapeHtml(item.name)}</span><small>${item.birthYear || '—'}</small></button>`).join('') || '<span class="muted">Heat zatím nemá jezdce.</span>'}</aside></div>` : '<div class="card empty">Pro tuto volbu není žádný jezdec.</div>');
+    app.innerHTML = layoutSide(content, 'speaker'); bindAdminCommon();
+    $('#speakerCat').onchange = eventTarget => { state.speakerState.categoryId = eventTarget.target.value; state.speakerState.heat = 1; state.speakerState.riderIndex = 0; save(); renderSpeaker(); }; $('#speakerHeat').onchange = eventTarget => { state.speakerState.heat = Number(eventTarget.target.value); state.speakerState.riderIndex = 0; save(); renderSpeaker(); }; $('[data-speaker-prev]')?.addEventListener('click', () => { state.speakerState.riderIndex = Math.max(0, index - 1); save(); renderSpeaker(); }); $('[data-speaker-next]')?.addEventListener('click', () => { state.speakerState.riderIndex = Math.min(Math.max(list.length - 1, 0), index + 1); save(); renderSpeaker(); }); $$('[data-speaker-index]').forEach(button => button.onclick = () => { state.speakerState.riderIndex = Number(button.dataset.speakerIndex); save(); renderSpeaker(); });
   }
 
-  function adminRiders(){
-    const content=adminHeader('Jezdci','Přihlášky, prezence a rozdělení do kategorií.',`<button class="btn btn-outline" data-action="import-csv">Import Google Sheets CSV</button><button class="btn btn-primary" data-action="add-rider">+ Přidat jezdce</button>`)+`
-      <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Jezdec</th><th>Kategorie</th><th>Město</th><th>Instagram</th><th>Stav</th></tr></thead><tbody>${state.riders.sort((a,b)=>a.bib-b.bib).map(r=>`<tr><td class="score">${r.bib}</td><td><div class="rider-name">${escapeHtml(r.name)}</div><div class="rider-meta">${escapeHtml(r.sponsors||'')}</div></td><td><span class="pill">${escapeHtml(catName(r.categoryId))}</span></td><td>${escapeHtml(r.city||'—')}</td><td>${escapeHtml(r.instagram||'—')}</td><td><button class="btn btn-small ${r.status==='checked-in'?'btn-primary':'btn-outline'}" data-checkin="${r.id}">${r.status==='checked-in'?'Prezentován':'Prezentovat'}</button></td></tr>`).join('')}</tbody></table></div>`;
-    app.innerHTML=layoutSide(content,'riders');bindAdminCommon();$$('[data-checkin]').forEach(b=>b.onclick=()=>{const r=rider(b.dataset.checkin);r.status=r.status==='checked-in'?'registered':'checked-in';save();adminRiders()});
-    $('[data-action="add-rider"]')?.addEventListener('click',openAddRider);$('[data-action="import-csv"]')?.addEventListener('click',openCsvImport);
+  function openEventForm(id) {
+    const event = id ? state.events.find(item => item.id === id) : newEvent(); if (!event) return;
+    modal(id ? 'Upravit závod' : 'Nový závod', `<form id="eventForm" class="form-grid"><div class="field full"><label>Název závodu *</label><input class="input" name="name" required value="${escapeHtml(event.name)}"></div><div class="field"><label>Datum závodu</label><input class="input" type="date" name="date" value="${escapeHtml(event.date)}"></div><div class="field"><label>Místo</label><input class="input" name="location" value="${escapeHtml(event.location)}"></div><div class="field"><label>Typ poroty</label><select class="select" name="judgeCount"><option value="3" ${event.judgeCount === 3 ? 'selected' : ''}>3 porotci</option><option value="5" ${event.judgeCount === 5 ? 'selected' : ''}>5 porotců</option></select></div><div class="field"><label>Počet jízd</label><select class="select" name="runCount">${[1,2,3].map(count => `<option value="${count}" ${event.runCount === count ? 'selected' : ''}>${count} ${count === 1 ? 'jízda' : 'jízdy'}</option>`).join('')}</select><div class="help">Závod nemá semifinále ani finále.</div></div><div class="field"><label>Stav závodu</label><select class="select" name="status">${['draft','registration','live','finished'].map(status => `<option value="${status}" ${event.status === status ? 'selected' : ''}>${statusLabel(status)}</option>`).join('')}</select></div><div class="field full"><label>Info o závodu</label><textarea class="textarea" name="info" rows="4" placeholder="Místo, čas, pravidla, kontakt...">${escapeHtml(event.info)}</textarea></div><div class="field full"><button class="btn btn-primary">Uložit závod</button></div></form>`);
+    $('#eventForm').onsubmit = formEvent => { formEvent.preventDefault(); const values = Object.fromEntries(new FormData(formEvent.currentTarget)); if (!id) { const created = newEvent({...values, judgeCount:Number(values.judgeCount), runCount:Number(values.runCount)}); ensureEvent(created); state.events.push(created); state.activeEventId = created.id; } else { Object.assign(event, {name:String(values.name).trim(), date:values.date, location:values.location, info:values.info || '', status:values.status, judgeCount:Number(values.judgeCount), runCount:Number(values.runCount)}); ensureEvent(event); } save(); closeModal(); toast('Závod je uložený.'); renderAdmin(); };
   }
-
-  function adminCategories(){
-    const content=adminHeader('Kategorie','Nastavení runů a počtu postupujících.',`<button class="btn btn-primary" data-action="add-category">+ Kategorie</button>`)+`<div class="grid grid-2">${state.categories.map(c=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:18px"><div><h2>${escapeHtml(c.name)}</h2><span class="muted">${state.riders.filter(r=>r.categoryId===c.id).length} jezdců</span></div><button class="icon-btn" data-edit-cat="${c.id}">✎</button></div><div class="grid grid-2 mt"><div><span class="muted">Runy</span><div class="score">${c.runs}</div></div><div><span class="muted">Postupuje</span><div class="score">TOP ${c.advance}</div></div></div></div>`).join('')}</div>`;
-    app.innerHTML=layoutSide(content,'categories');bindAdminCommon();$('[data-action="add-category"]')?.addEventListener('click',()=>openCategory());$$('[data-edit-cat]').forEach(b=>b.onclick=()=>openCategory(b.dataset.editCat));
+  function openCategoryForm(id) {
+    const event = activeEvent(); const category = id ? event.categories.find(item => item.id === id) : {name:'', minBirthYear:null, maxBirthYear:null, heatSize:4, order:event.categories.length + 1}; if (!category) return;
+    modal(id ? 'Upravit kategorii' : 'Nová kategorie', `<form id="categoryForm" class="form-grid"><div class="field full"><label>Název kategorie *</label><input class="input" name="name" required value="${escapeHtml(category.name)}" placeholder="-14 let"></div><div class="field"><label>Od ročníku</label><input class="input" type="number" name="minBirthYear" min="1900" max="${yearNow + 1}" value="${category.minBirthYear ?? ''}" placeholder="např. 2013"></div><div class="field"><label>Do ročníku</label><input class="input" type="number" name="maxBirthYear" min="1900" max="${yearNow + 1}" value="${category.maxBirthYear ?? ''}" placeholder="např. 2012"></div><div class="field"><label>Jezdců v heat</label><input class="input" type="number" name="heatSize" min="1" max="99" value="${category.heatSize || 4}"></div><div class="field full"><div class="help">Prázdné „od“ znamená bez dolní hranice, prázdné „do“ bez horní hranice. Rozsahy se nesmí překrývat.</div></div><div class="field full"><button class="btn btn-primary">Uložit kategorii</button></div></form>`);
+    $('#categoryForm').onsubmit = formEvent => { formEvent.preventDefault(); const values = Object.fromEntries(new FormData(formEvent.currentTarget)); const next = {...category, name:String(values.name).trim(), minBirthYear:parseYear(values.minBirthYear), maxBirthYear:parseYear(values.maxBirthYear), heatSize:Math.max(1, Number(values.heatSize) || 4)}; if (next.minBirthYear != null && next.maxBirthYear != null && next.minBirthYear > next.maxBirthYear) { toast('Ročník „od“ musí být menší nebo stejný jako „do“.'); return; } if (event.categories.some(item => item.id !== id && rangesOverlap(next, item))) { toast('Rozsah se překrývá s jinou kategorií.'); return; } if (!id) { next.id = uid('cat'); event.categories.push(next); } else Object.assign(category, next); event.riders.forEach(rider => assignCategory(event, rider)); save(); closeModal(); toast('Kategorie je uložená.'); adminCategories(); };
   }
-
-  function adminJudges(){
-    const content=adminHeader('Rozhodčí a role','Kdo může zadávat body, spravovat závod nebo obsluhovat prezenci.',`<button class="btn btn-primary" data-action="add-judge">+ Uživatel</button>`)+`<div class="table-wrap"><table class="table"><thead><tr><th>Jméno</th><th>E-mail</th><th>Role</th></tr></thead><tbody>${state.judges.map(j=>`<tr><td class="rider-name">${escapeHtml(j.name)}</td><td>${escapeHtml(j.email)}</td><td><span class="pill">${escapeHtml(j.role.toUpperCase())}</span></td></tr>`).join('')}</tbody></table></div>`;
-    app.innerHTML=layoutSide(content,'judges');bindAdminCommon();$('[data-action="add-judge"]')?.addEventListener('click',openJudge);
-  }
-
-  function adminSettings(){
-    const max=state.scoring.reduce((s,c)=>s+c.max*c.weight,0);
-    const content=adminHeader('Scoring pravidla','Počet porotců a pravidla tohoto závodu.',`<button class="btn btn-primary" data-action="add-criterion">+ Kritérium</button>`)+`
-      <form id="panelForm" class="card form-grid"><div class="field full"><label for="judgeCount">Počet porotců v závodě</label><select id="judgeCount" class="select"><option value="3" ${state.event.judgeCount===3?'selected':''}>3 — průměr všech známek</option><option value="5" ${state.event.judgeCount===5?'selected':''}>5 — škrtnout minimum a maximum</option></select></div><div id="panelSeats" class="field full"></div><div class="field full"><button class="btn btn-primary">Uložit porotu</button><p class="help">Změna poroty přepočítá výsledky. Dosavadní hodnocení zůstávají uložená.</p></div></form>
-      <div class="card mt"><div class="section-title" style="margin-top:0"><div><h2>Kritéria</h2><p>Maximum celkem: ${max}</p></div></div>${state.scoring.map((c,i)=>`<div class="criterion"><div class="criterion-head"><div><b>${escapeHtml(c.label)}</b><div class="help">${escapeHtml(c.desc||'')}</div></div><div style="display:flex;align-items:center;gap:10px"><span class="pill">max ${c.max} • váha ${c.weight}</span><button class="icon-btn" data-edit-criterion="${i}">✎</button></div></div></div>`).join('')}</div>
-      <div class="card mt"><h3>Výpočet výsledku</h3><p class="muted">${ruleText()}. Nejprve lepší ze dvou jízd u každého porotce, potom průměr poroty podle Excelu. Výsledek se zobrazí, až hodnotí všichni. Nové závody používají Difficulty, Diversity, Style a Consistency po 25 bodech; dříve uložená kritéria zůstávají zachována.</p></div>`;
-    app.innerHTML=layoutSide(content,'settings');bindAdminCommon();$('[data-action="add-criterion"]')?.addEventListener('click',()=>openCriterion());$$('[data-edit-criterion]').forEach(b=>b.onclick=()=>openCriterion(+b.dataset.editCriterion));
-    const drawSeats=()=>{
-      const count=+$('#judgeCount').value;
-      const previous=$$('[data-panel-seat]').map(s=>s.value);
-      $('#panelSeats').innerHTML=Array.from({length:count},(_,i)=>`<label for="seat${i}">Porotce ${i+1}</label><select id="seat${i}" class="select" data-panel-seat><option value="">Vyber porotce</option>${state.judges.filter(j=>['judge','head_judge'].includes(j.role)).map(j=>`<option value="${escapeHtml(j.id)}" ${j.id===(previous[i]||state.event.panelIds[i])?'selected':''}>${escapeHtml(j.name)}</option>`).join('')}</select>`).join('');
-    };
-    drawSeats(); $('#judgeCount').onchange=drawSeats;
-    $('#panelForm').onsubmit=e=>{
-      e.preventDefault();const ids=$$('[data-panel-seat]').map(s=>s.value);const count=+$('#judgeCount').value;
-      if(![3,5].includes(count)||ids.length!==count||ids.some(id=>!id)||new Set(ids).size!==count){toast('Vyber různé porotce pro všechna místa.');return;}
-      state.event.judgeCount=count;state.event.panelIds=ids;state.judgeState.judgeId=ids[0];state.judgeState.values={};save();toast('Porota uložena, výsledky přepočítány.');adminSettings();
-    };
-  }
-
-  function renderAdmin(){if(!state.currentUser && DEMO){state.currentUser={name:'Demo administrátor',role:'admin'}};const section=sessionStorage.getItem('adminSection')||'dashboard';({dashboard:adminDashboard,riders:adminRiders,categories:adminCategories,judges:adminJudges,settings:adminSettings}[section]||adminDashboard)()}
-  function bindAdminCommon(){
-    $$('[data-side]').forEach(b=>b.onclick=()=>{const s=b.dataset.side;if(s==='judge'){location.hash='judge';return}sessionStorage.setItem('adminSection',s);renderAdmin()});
-    $('[data-action="logout"]')?.addEventListener('click',logout);
-  }
-
-  function judgeRiders(){return state.riders.filter(r=>r.categoryId===state.judgeState.categoryId && r.status==='checked-in')}
-  function scoreTotal(values){return +state.scoring.reduce((sum,c)=>sum+(+values[c.key]||0)*c.weight,0).toFixed(1)}
-  function renderJudge(){
-    if(!state.currentUser && DEMO) state.currentUser={name:'Demo rozhodčí 1',role:'judge'};
-    const list=judgeRiders(); if(!list.length){state.judgeState.riderIndex=0}
-    const idx=Math.min(state.judgeState.riderIndex||0,Math.max(0,list.length-1)); const r=list[idx];
-    if(!state.judgeState.values || Object.keys(state.judgeState.values).length===0) state.judgeState.values=Object.fromEntries(state.scoring.map(c=>[c.key,0]));
-    const vals=state.judgeState.values; const total=scoreTotal(vals); const max=state.scoring.reduce((s,c)=>s+c.max*c.weight,0);
-    const content=adminHeader('Judge mode','Rychlé zadávání bodů z mobilu nebo tabletu.',`${DEMO?`<label>Demo porotce <select id="demoJudge" class="select">${panel().map(id=>`<option value="${escapeHtml(id)}" ${id===currentJudgeId()?'selected':''}>${escapeHtml(state.judges.find(j=>j.id===id)?.name||id)}</option>`).join('')}</select></label>`:''}<select id="judgeCat" class="select">${state.categories.map(c=>`<option value="${c.id}" ${c.id===state.judgeState.categoryId?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}</select>`)+`${r?`<div class="judge-grid"><div class="card"><div class="current-rider"><div style="display:flex;gap:14px;align-items:center"><div class="bib">${r.bib}</div><div><div class="eyebrow">RUN ${state.judgeState.run}</div><h2>${escapeHtml(r.name)}</h2><div class="muted">${escapeHtml(r.city)} • ${escapeHtml(catName(r.categoryId))}</div></div></div><span class="pill">${idx+1} / ${list.length}</span></div>
-      ${state.scoring.map(c=>`<div class="criterion"><div class="criterion-head"><div><b>${escapeHtml(c.label)}</b><div class="help">${escapeHtml(c.desc||'')}</div></div><span class="criterion-score" data-score-label="${c.key}">${(+vals[c.key]||0).toFixed(1)}</span></div><input class="range" type="range" min="0" max="${c.max}" step="0.1" value="${+vals[c.key]||0}" data-criterion="${c.key}"></div>`).join('')}
-      </div><aside class="card total-box"><div class="eyebrow">CELKOVÉ SKÓRE</div><div class="big-total" id="judgeTotal">${total.toFixed(1)}</div><div class="total-max">z ${max}</div><div class="progress"><span id="judgeProgress" style="width:${total/max*100}%"></span></div><div class="total-actions"><button class="btn btn-primary" data-action="submit-score">Odeslat score</button><button class="btn btn-outline" data-action="reset-score">Vynulovat</button><div class="grid grid-2"><button class="btn btn-outline" data-action="prev-rider">← Předchozí</button><button class="btn btn-outline" data-action="next-rider">Další →</button></div><div class="tabs" style="width:100%;justify-content:center"><button class="tab ${state.judgeState.run===1?'active':''}" data-run="1">Run 1</button><button class="tab ${state.judgeState.run===2?'active':''}" data-run="2">Run 2</button></div></div><div class="judge-history"><b>Uložené známky</b>${state.scores.filter(s=>s.riderId===r.id).map(s=>`<div class="history-row"><span>Run ${s.run} • ${escapeHtml(s.judge)}</span><b>${s.total.toFixed(1)}</b></div>`).join('')||'<span class="muted">Zatím nic.</span>'}</div></aside></div>`:`<div class="card empty">V této kategorii není žádný prezentovaný jezdec.</div>`}`;
-    app.innerHTML=layoutSide(content,'judge');
-    $$('[data-side]').forEach(b=>b.onclick=()=>{if(b.dataset.side==='judge')return;sessionStorage.setItem('adminSection',b.dataset.side);location.hash='admin'});$('[data-action="logout"]')?.addEventListener('click',logout);
-    $('#demoJudge')?.addEventListener('change',e=>{state.judgeState.judgeId=e.target.value;state.judgeState.values={};save();renderJudge()});
-    $('#judgeCat')?.addEventListener('change',e=>{state.judgeState.categoryId=e.target.value;state.judgeState.riderIndex=0;state.judgeState.values={};save();renderJudge()});
-    $$('[data-criterion]').forEach(inp=>inp.oninput=()=>{state.judgeState.values[inp.dataset.criterion]=+inp.value;const t=scoreTotal(state.judgeState.values);$(`[data-score-label="${inp.dataset.criterion}"]`).textContent=(+inp.value).toFixed(1);$('#judgeTotal').textContent=t.toFixed(1);$('#judgeProgress').style.width=(t/max*100)+'%';save()});
-    $$('[data-run]').forEach(b=>b.onclick=()=>{state.judgeState.run=+b.dataset.run;state.judgeState.values={};save();renderJudge()});
-    $('[data-action="reset-score"]')?.addEventListener('click',()=>{state.judgeState.values={};save();renderJudge()});
-    $('[data-action="prev-rider"]')?.addEventListener('click',()=>{state.judgeState.riderIndex=Math.max(0,idx-1);state.judgeState.values={};save();renderJudge()});
-    $('[data-action="next-rider"]')?.addEventListener('click',()=>{state.judgeState.riderIndex=Math.min(list.length-1,idx+1);state.judgeState.values={};save();renderJudge()});
-    $('[data-action="submit-score"]')?.addEventListener('click',()=>{
-      const judgeId=currentJudgeId();
-      if(!panel().includes(judgeId)){toast('Tento účet není přiřazen do poroty.');return;}
-      const values=Object.fromEntries(state.scoring.map(c=>[c.key,Number(state.judgeState.values[c.key]??0)]));
-      if(state.scoring.some(c=>!Number.isFinite(values[c.key])||values[c.key]<0||values[c.key]>c.max)){toast('Body musí být v povoleném rozsahu.');return;}
-      const t=scoreTotal(values);const run=state.judgeState.run;
-      const entry={id:uid('s'),riderId:r.id,categoryId:r.categoryId,run,judgeId,judge:state.judges.find(j=>j.id===judgeId)?.name||'Porotce',values,total:t,submitted:true};
-      state.scores=state.scores.filter(s=>!(s.riderId===r.id && s.categoryId===r.categoryId && s.run===run && s.judgeId===judgeId));
-      state.scores.push(entry);state.judgeState.values={};state.judgeState.riderIndex=Math.min(list.length-1,idx+1);save();toast('Score '+t.toFixed(1)+' uložen.');renderJudge();
-    });
-  }
-
-  function logout(){state.currentUser=null;save();if(sb)sb.auth.signOut();location.hash='login'}
-
-  function modal(title,body){const t=$('#modalTemplate').content.cloneNode(true);t.querySelector('#modalTitle').textContent=title;t.querySelector('#modalBody').innerHTML=body;document.body.appendChild(t);$$('[data-modal-close]').forEach(x=>x.onclick=closeModal)}
-  function closeModal(){document.querySelector('.modal-backdrop')?.remove()}
-
-  function openAddRider(){modal('Přidat jezdce',`<form id="addRiderForm" class="form-grid"><div class="field full"><label>Jméno</label><input class="input" name="name" required></div><div class="field"><label>Kategorie</label><select class="select" name="categoryId">${state.categories.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div><div class="field"><label>Startovní číslo</label><input class="input" type="number" name="bib" value="${Math.max(0,...state.riders.map(r=>+r.bib||0))+1}"></div><div class="field"><label>Město</label><input class="input" name="city"></div><div class="field"><label>Instagram</label><input class="input" name="instagram"></div><div class="field full"><button class="btn btn-primary">Uložit</button></div></form>`);$('#addRiderForm').onsubmit=e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.currentTarget));state.riders.push({id:uid('r'),name:o.name,categoryId:o.categoryId,bib:+o.bib,city:o.city||'',instagram:o.instagram||'',sponsors:'',birth:'',bio:'',status:'registered'});save();closeModal();adminRiders()}}
-  function openCategory(id){const c=state.categories.find(x=>x.id===id)||{name:'',runs:2,advance:8};modal(id?'Upravit kategorii':'Nová kategorie',`<form id="catForm" class="form-grid"><div class="field full"><label>Název</label><input class="input" name="name" value="${escapeHtml(c.name)}" required></div><div class="field"><label>Počet runů</label><input class="input" type="number" min="1" max="5" name="runs" value="${c.runs}"></div><div class="field"><label>Postupuje TOP</label><input class="input" type="number" min="1" name="advance" value="${c.advance}"></div><div class="field full"><button class="btn btn-primary">Uložit</button></div></form>`);$('#catForm').onsubmit=e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.currentTarget));if(id){Object.assign(c,{name:o.name,runs:+o.runs,advance:+o.advance})}else state.categories.push({id:uid('c'),name:o.name,runs:+o.runs,advance:+o.advance,order:state.categories.length+1});save();closeModal();adminCategories()}}
-  function openJudge(){modal('Přidat uživatele',`<form id="judgeForm" class="form-grid"><div class="field full"><label>Jméno</label><input class="input" name="name" required></div><div class="field full"><label>E-mail Google účtu</label><input class="input" type="email" name="email" required></div><div class="field full"><label>Role</label><select class="select" name="role"><option value="judge">Judge</option><option value="head_judge">Head Judge</option><option value="registration">Prezence</option><option value="speaker">Speaker</option><option value="admin">Admin</option></select></div><div class="field full"><button class="btn btn-primary">Uložit</button></div></form>`);$('#judgeForm').onsubmit=e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.currentTarget));state.judges.push({id:uid('u'),...o});save();closeModal();adminJudges()}}
-  function openCriterion(index){const c=index!==undefined?state.scoring[index]:{label:'',key:'criterion_'+Date.now(),max:20,weight:1,desc:''};modal(index!==undefined?'Upravit kritérium':'Nové kritérium',`<form id="criterionForm" class="form-grid"><div class="field full"><label>Název</label><input class="input" name="label" value="${escapeHtml(c.label)}" required></div><div class="field"><label>Maximum</label><input class="input" type="number" step="0.1" name="max" value="${c.max}"></div><div class="field"><label>Váha</label><input class="input" type="number" step="0.1" name="weight" value="${c.weight}"></div><div class="field full"><label>Popis</label><input class="input" name="desc" value="${escapeHtml(c.desc||'')}"></div><div class="field full"><button class="btn btn-primary">Uložit</button></div></form>`);$('#criterionForm').onsubmit=e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.currentTarget));Object.assign(c,{label:o.label,max:+o.max,weight:+o.weight,desc:o.desc});if(index===undefined)state.scoring.push(c);save();closeModal();adminSettings()}}
-
-  function openCsvImport(){modal('Import přihlášek z Google Sheets',`<div class="dropzone"><b>Exportuj odpovědi Google Form jako CSV</b><p>Soubor sem nahraj. Rozpoznáme sloupce: Jméno závodníka, Kategorie, Město, Datum narození, Sponzoři, Instagram, Informace o jezdci.</p><input id="csvFile" type="file" accept=".csv,text/csv"></div><div id="csvStatus" class="help mt"></div>`);$('#csvFile').onchange=async e=>{const file=e.target.files[0];if(!file)return;const text=await file.text();try{const rows=parseCSV(text);const n=importRows(rows);$('#csvStatus').innerHTML=`<span class="accent">Hotovo: importováno ${n} jezdců.</span>`;save();setTimeout(()=>{closeModal();adminRiders()},700)}catch(err){$('#csvStatus').textContent='Chyba: '+err.message}}}
-  function parseCSV(text){const first=(text.split(/\r?\n/)[0]||'');const delim=(first.match(/;/g)||[]).length>(first.match(/,/g)||[]).length?';':',';const out=[];let row=[],cell='',q=false;for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'){if(q&&text[i+1]==='"'){cell+='"';i++}else q=!q}else if(ch===delim&&!q){row.push(cell);cell=''}else if((ch==='\n'||ch==='\r')&&!q){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(x=>x.trim()))out.push(row);row=[];cell=''}else cell+=ch}if(cell||row.length){row.push(cell);out.push(row)}return out}
-  function importRows(rows){if(rows.length<2)return 0;const norm=s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();const headers=rows[0].map(norm);const idx=(...names)=>headers.findIndex(h=>names.some(n=>h.includes(norm(n))));const iName=idx('jméno závodníka','jmeno zavodnika','jméno','name'),iCat=idx('kategorie','category'),iCity=idx('město','mesto','city'),iBirth=idx('datum narození','datum narozeni','birth'),iSponsors=idx('sponzoři','sponzori','sponsors'),iIg=idx('instagram'),iBio=idx('informace o jezdci','bio');let count=0;for(const row of rows.slice(1)){const name=row[iName]?.trim();if(!name)continue;const catRaw=row[iCat]?.trim();let c=state.categories.find(x=>norm(x.name)===norm(catRaw||''));if(!c){c={id:uid('c'),name:catRaw||'OPEN',runs:2,advance:8,order:state.categories.length+1};state.categories.push(c)}state.riders.push({id:uid('r'),bib:Math.max(0,...state.riders.map(r=>+r.bib||0))+1,name,categoryId:c.id,city:iCity>=0?row[iCity]||'':'',birth:iBirth>=0?row[iBirth]||'':'',sponsors:iSponsors>=0?row[iSponsors]||'':'',instagram:iIg>=0?row[iIg]||'':'',bio:iBio>=0?row[iBio]||'':'',status:'registered'});count++}return count}
-
-  function exportResults(catId){
-    const cell=v=>'"'+String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"';
-    const rows=[['Pořadí','Startovní číslo','Jezdec','Kategorie',...panel().map((_,i)=>'Porotce '+(i+1)),'Škrtnuto min','Škrtnuto max','Výsledek','Hodnoceno','Počet porotců'],
-      ...leaderboard(catId).map(r=>[r.rank,r.bib,r.name,catName(r.categoryId),...r.marks,r.dropped.length?r.marks[r.dropped[0]]:'',r.dropped.length?r.marks[r.dropped[1]]:'',r.best===null?'':r.best.toFixed(2),r.received,state.event.judgeCount])];
-    download('vysledky-'+catName(catId)+'.csv',rows.map(row=>row.map(cell).join(';')).join('\n'));
-  }
-  function download(name,text){const blob=new Blob(['\ufeff'+text],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();URL.revokeObjectURL(a.href)}
-
-  async function handleAuth(){
-    if(!sb)return false; const {data:{session}}=await sb.auth.getSession(); if(!session)return false;
-    const email=session.user.email;let role='viewer',name=session.user.user_metadata?.full_name||email;
-    const {data}=await sb.from('profiles').select('role,full_name').eq('id',session.user.id).maybeSingle();if(data){role=data.role||role;name=data.full_name||name}
-    state.currentUser={id:session.user.id,name,email,role};save();if(route()==='auth')location.hash=(role==='judge'||role==='head_judge')?'judge':'admin';return true;
-  }
-
-  async function render(){setActiveNav();await handleAuth();const r=route();if(r==='live')renderLive();else if(r==='startlist')renderStartlist();else if(r==='registration')renderRegistration();else if(r==='login'||r==='auth')renderLogin();else if(r==='admin')renderAdmin();else if(r==='judge')renderJudge();else renderLive();window.scrollTo({top:0,behavior:'instant'})}
+  function openRiderForm() { const event = activeEvent(); modal('Přidat jezdce', `<form id="riderForm" class="form-grid"><div class="field full"><label>Jméno *</label><input class="input" name="name" required></div><div class="field"><label>Rok narození *</label><input class="input" type="number" name="birthYear" min="1900" max="${yearNow + 1}" required></div><div class="field"><label>Startovní číslo</label><input class="input" type="number" name="bib" value="${Math.max(0, ...event.riders.map(rider => rider.bib || 0)) + 1}"></div><div class="field"><label>Město</label><input class="input" name="city"></div><div class="field"><label>Instagram</label><input class="input" name="instagram"></div><div class="field full"><button class="btn btn-primary">Uložit</button></div></form>`); $('#riderForm').onsubmit = formEvent => { formEvent.preventDefault(); const values = Object.fromEntries(new FormData(formEvent.currentTarget)); const rider = {id:uid('rider'), registrationOrder:event.riders.length + 1, name:String(values.name).trim(), birthYear:parseYear(values.birthYear), bib:Number(values.bib) || event.riders.length + 1, city:values.city || '', instagram:values.instagram || '', sponsors:'', bio:'', status:'registered'}; assignCategory(event, rider); event.riders.push(rider); save(); closeModal(); adminRiders(); }; }
+  function openJudgeForm() { const event = activeEvent(); modal('Přidat uživatele', `<form id="judgeForm" class="form-grid"><div class="field full"><label>Jméno *</label><input class="input" name="name" required></div><div class="field full"><label>E-mail Google účtu *</label><input class="input" name="email" type="email" required></div><div class="field full"><label>Role</label><select class="select" name="role"><option value="judge">Judge</option><option value="head_judge">Head Judge</option><option value="registration">Prezence</option><option value="speaker">Speaker</option><option value="admin">Admin</option></select></div><div class="field full"><button class="btn btn-primary">Uložit</button></div></form>`); $('#judgeForm').onsubmit = formEvent => { formEvent.preventDefault(); const values = Object.fromEntries(new FormData(formEvent.currentTarget)); event.judges.push({id:uid('judge'), ...values}); save(); closeModal(); adminJudges(); }; }
+  function openCriterionForm(index) { const event = activeEvent(); const criterion = index == null ? {key:uid('criterion'), label:'', max:25, weight:1, desc:''} : event.scoring[index]; modal(index == null ? 'Nové kritérium' : 'Upravit kritérium', `<form id="criterionForm" class="form-grid"><div class="field full"><label>Název *</label><input class="input" name="label" required value="${escapeHtml(criterion.label)}"></div><div class="field"><label>Maximum</label><input class="input" name="max" type="number" min="0" step="0.1" value="${criterion.max}"></div><div class="field"><label>Váha</label><input class="input" name="weight" type="number" min="0" step="0.1" value="${criterion.weight}"></div><div class="field full"><label>Popis</label><input class="input" name="desc" value="${escapeHtml(criterion.desc || '')}"></div><div class="field full"><button class="btn btn-primary">Uložit</button></div></form>`); $('#criterionForm').onsubmit = formEvent => { formEvent.preventDefault(); const values = Object.fromEntries(new FormData(formEvent.currentTarget)); Object.assign(criterion, {label:values.label, max:Number(values.max), weight:Number(values.weight), desc:values.desc}); if (index == null) event.scoring.push(criterion); save(); closeModal(); adminSettings(); }; }
+  function openCsvImport() { modal('Import přihlášek', `<div class="dropzone"><b>Exportuj odpovědi Google Form jako CSV</b><p>Stačí jméno a rok narození. Kategorie se nepřenáší, web ji doplní podle nastaveného rozsahu.</p><input id="csvFile" type="file" accept=".csv,text/csv"></div><div id="csvStatus" class="help mt"></div>`); $('#csvFile').onchange = async changeEvent => { const file = changeEvent.target.files[0]; if (!file) return; try { const count = importRows(parseCSV(await file.text())); $('#csvStatus').innerHTML = `<span class="accent">Hotovo: importováno ${count} jezdců.</span>`; save(); setTimeout(() => { closeModal(); adminRiders(); }, 700); } catch (error) { $('#csvStatus').textContent = `Chyba: ${error.message}`; } }; }
+  function parseCSV(text) { const first = text.split(/\r?\n/)[0] || ''; const delimiter = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ';' : ','; const rows = []; let row = [], cell = '', quoted = false; for (let index = 0; index < text.length; index += 1) { const char = text[index]; if (char === '"') { if (quoted && text[index + 1] === '"') { cell += '"'; index += 1; } else quoted = !quoted; } else if (char === delimiter && !quoted) { row.push(cell); cell = ''; } else if ((char === '\n' || char === '\r') && !quoted) { if (char === '\r' && text[index + 1] === '\n') index += 1; row.push(cell); if (row.some(value => value.trim())) rows.push(row); row = []; cell = ''; } else cell += char; } if (cell || row.length) { row.push(cell); rows.push(row); } return rows; }
+  function importRows(rows) { if (rows.length < 2) return 0; const event = activeEvent(); const normalizeHeader = value => String(value).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim(); const headers = rows[0].map(normalizeHeader); const indexOf = (...names) => headers.findIndex(header => names.some(name => header.includes(normalizeHeader(name)))); const nameIndex = indexOf('jméno závodníka','jmeno zavodnika','jméno','name'); const yearIndex = indexOf('rok narození','rok narozeni','year','datum narození','datum narozeni','birth'); const cityIndex = indexOf('město','mesto','city'); const sponsorsIndex = indexOf('sponzoři','sponzori','sponsors'); const instagramIndex = indexOf('instagram'); const bioIndex = indexOf('informace o jezdci','bio'); let count = 0; for (const row of rows.slice(1)) { const name = row[nameIndex]?.trim(); const birthYear = parseYear(row[yearIndex]); if (!name || !birthYear) continue; const rider = {id:uid('rider'), registrationOrder:event.riders.length + 1, bib:Math.max(0, ...event.riders.map(item => Number(item.bib) || 0)) + 1, name, birthYear, city:cityIndex >= 0 ? row[cityIndex] || '' : '', sponsors:sponsorsIndex >= 0 ? row[sponsorsIndex] || '' : '', instagram:instagramIndex >= 0 ? row[instagramIndex] || '' : '', bio:bioIndex >= 0 ? row[bioIndex] || '' : '', status:'registered'}; assignCategory(event, rider); event.riders.push(rider); count += 1; } return count; }
+  function exportResults(event, categoryId) { const safe = value => `"${String(value ?? '').replace(/^[=+@-]/, "'$&").replaceAll('"', '""')}"`; const rows = [['Pořadí','Startovní číslo','Jezdec','Ročník','Kategorie',...panel(event).map((_,index) => `Porotce ${index + 1}`),'Výsledek','Hodnoceno','Porota'], ...leaderboard(event, categoryId).map(row => [row.rank,row.bib,row.name,row.birthYear,categoryName(event,row.categoryId),...row.marks,row.total == null ? '' : row.total.toFixed(2),row.received,event.judgeCount])]; download(`vysledky-${categoryName(event,categoryId)}.csv`, rows.map(row => row.map(safe).join(';')).join('\n')); }
+  function download(name, text) { const blob = new Blob(['\ufeff' + text], {type:'text/csv;charset=utf-8'}); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = name; link.click(); URL.revokeObjectURL(link.href); }
+  function logout() { state.currentUser = null; save(); if (sb) sb.auth.signOut(); location.hash = 'login'; }
+  function modal(title, body) { const template = $('#modalTemplate').content.cloneNode(true); template.querySelector('#modalTitle').textContent = title; template.querySelector('#modalBody').innerHTML = body; document.body.appendChild(template); $$('[data-modal-close]').forEach(element => element.onclick = closeModal); }
+  function closeModal() { document.querySelector('.modal-backdrop')?.remove(); }
+  async function handleAuth() { if (!sb) return false; const {data:{session}} = await sb.auth.getSession(); if (!session) return false; const email = session.user.email; let role = 'viewer'; let name = session.user.user_metadata?.full_name || email; const {data} = await sb.from('profiles').select('role,full_name').eq('id', session.user.id).maybeSingle(); if (data) { role = data.role || role; name = data.full_name || name; } state.currentUser = {id:session.user.id, name, email, role}; save(); if (route() === 'auth') location.hash = role === 'judge' || role === 'head_judge' ? 'judge' : 'admin'; return true; }
+  function renderLogin() { app.innerHTML = `<div class="login-shell"><div class="card"><div class="eyebrow">STAFF LOGIN</div><h1>Přihlášení</h1><p class="muted">Admin, rozhodčí a speaker se přihlásí přes Google. Diváci login nepotřebují.</p><button id="googleLogin" class="google-btn"><b>G</b> Pokračovat přes Google</button>${DEMO ? `<div class="section-title"><div><h3>Demo přístup</h3><p>Vyzkoušej role bez databáze.</p></div></div><div class="demo-logins"><button class="btn btn-outline" data-demo-role="admin">Admin</button><button class="btn btn-outline" data-demo-role="judge">Rozhodčí</button><button class="btn btn-outline" data-demo-role="speaker">Speaker</button></div>` : ''}</div></div>`; $('#googleLogin').onclick = async () => { if (!sb) { toast('Nejdřív doplň Supabase URL a klíč.'); return; } const {error} = await sb.auth.signInWithOAuth({provider:'google', options:{redirectTo:location.origin + '/#auth'}}); if (error) toast(error.message); }; $$('[data-demo-role]').forEach(button => button.onclick = () => { const role = button.dataset.demoRole; state.currentUser = {id:role === 'admin' ? 'admin' : role === 'judge' ? panel(activeEvent())[0] : panel(activeEvent())[0], name:role === 'admin' ? 'Demo administrátor' : role === 'judge' ? 'Demo porotce 1' : 'Demo speaker', role}; if (role === 'judge') state.judgeState.judgeId = panel(activeEvent())[0]; save(); location.hash = role === 'admin' ? 'admin' : role; }); }
+  async function render() { setActiveNav(); await handleAuth(); const current = route(); if (current === 'events') renderEvents(); else if (current === 'live') renderLive(); else if (current === 'startlist') renderStartlist(); else if (current === 'registration') renderRegistration(); else if (current === 'login' || current === 'auth') renderLogin(); else if (current === 'admin') renderAdmin(); else if (current === 'judge') renderJudge(); else if (current === 'speaker') renderSpeaker(); else renderEvents(); window.scrollTo({top:0, behavior:'instant'}); }
   render();
 })();

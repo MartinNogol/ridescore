@@ -9,17 +9,18 @@
     return {total:kept.reduce((sum,s)=>sum+s.value,0)/kept.length,
       dropped:count === 5 ? [sorted[0].index,sorted[4].index] : []};
   }
-  function riderResult(scores, panel) {
+  function riderResult(scores, panel, runCount = 2) {
     const latest = new Map();
     for (const s of scores) {
-      if (s.submitted && panel.includes(s.judgeId) && [1,2].includes(s.run)
+      if (s.submitted && panel.includes(s.judgeId) && Number.isInteger(s.run)
+          && s.run >= 1 && s.run <= runCount
           && typeof s.total === 'number' && Number.isFinite(s.total) && s.total >= 0) {
         latest.set(s.judgeId + ':' + s.run,s.total);
       }
     }
     const marks = panel.map(id => {
-      const a=latest.get(id+':1'), b=latest.get(id+':2');
-      return a === undefined && b === undefined ? null : Math.max(a ?? -1,b ?? -1);
+      const runs = Array.from({length:runCount}, (_, index) => latest.get(id + ':' + (index + 1))).filter(value => value !== undefined);
+      return runs.length ? Math.max(...runs) : null;
     });
     return {...aggregate(marks,panel.length), marks, received:marks.filter(v=>v!==null).length};
   }

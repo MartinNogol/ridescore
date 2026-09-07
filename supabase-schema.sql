@@ -17,7 +17,11 @@ create table if not exists public.events (
   slug text unique not null,
   event_date date,
   location text,
+  info text,
   status text not null default 'draft' check (status in ('draft','registration','live','finished')),
+  judge_count int not null default 5 check (judge_count in (3,5)),
+  run_count int not null default 2 check (run_count between 1 and 3),
+  judge_panel_ids uuid[] not null default '{}'::uuid[],
   scoring_config jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
@@ -29,12 +33,16 @@ create table if not exists public.categories (
   sort_order int not null default 0,
   run_count int not null default 2,
   advance_count int,
+  min_birth_year int,
+  max_birth_year int,
+  heat_size int not null default 4 check (heat_size > 0),
   unique(event_id,name)
 );
 
 create table if not exists public.riders (
   id uuid primary key default gen_random_uuid(),
   full_name text not null,
+  birth_year int check (birth_year between 1900 and 2100),
   birth_date date,
   city text,
   email text,
@@ -75,6 +83,16 @@ create table if not exists public.scores (
   submitted_at timestamptz not null default now(),
   unique(registration_id,judge_id,run_no)
 );
+
+-- Safe migrations when this starter schema was already created.
+alter table public.events add column if not exists info text;
+alter table public.events add column if not exists judge_count int not null default 5;
+alter table public.events add column if not exists run_count int not null default 2;
+alter table public.events add column if not exists judge_panel_ids uuid[] not null default '{}'::uuid[];
+alter table public.categories add column if not exists min_birth_year int;
+alter table public.categories add column if not exists max_birth_year int;
+alter table public.categories add column if not exists heat_size int not null default 4;
+alter table public.riders add column if not exists birth_year int;
 
 -- Safe public leaderboard view. No birth date, email or phone is exposed.
 create or replace view public.public_entries as

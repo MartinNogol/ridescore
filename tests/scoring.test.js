@@ -1,0 +1,14 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {aggregate,riderResult}=require('../scoring.js');
+const panel=['a','b','c','d','e'];
+const marks=(vals,run=1)=>vals.map((total,i)=>({judgeId:panel[i],total,run,submitted:true}));
+test('three judges: arithmetic mean',()=>assert.equal(aggregate([70,80,90],3).total,80));
+test('five judges: trim extremes',()=>{const r=aggregate([10,70,80,90,100],5);assert.equal(r.total,80);assert.deepEqual(r.dropped,[0,4]);});
+test('equal extremes remove exactly two entries',()=>{const r=aggregate([80,80,80,80,80],5);assert.equal(r.total,80);assert.equal(r.dropped.length,2);});
+test('zero counts; missing and invalid do not',()=>{assert.equal(aggregate([0,0,0],3).total,0);for(const a of [[80,90],[80,90,null],[80,90,NaN],[80,90,-1],[80,90,'70']])assert.equal(aggregate(a,3).total,null);});
+test('Excel: select best run per judge BEFORE averaging',()=>{const r=riderResult([...marks([36,40,44,95,44]),...marks([32,53,38,79,44],2)],panel);assert.deepEqual(r.marks,[36,53,44,95,44]);assert.equal(r.total,47);});
+test('duplicate submission replaces a judge run',()=>{const rows=[...marks([60,70,80]),{judgeId:'a',total:90,run:1,submitted:true}];assert.equal(riderResult(rows,panel.slice(0,3)).total,80);});
+test('wait for all assigned judges and ignore outsiders',()=>{assert.equal(riderResult(marks([60,70,80,90]),panel).total,null);assert.equal(riderResult([...marks([60,70,80]),{judgeId:'outsider',total:100,run:1,submitted:true}],panel.slice(0,3)).total,70);});
+test('drafts do not count; precision retained',()=>{assert.equal(riderResult([{...marks([70])[0],submitted:false}],panel.slice(0,3)).received,0);assert.equal(aggregate([1,2,2],3).total,5/3);});
+test('configurable run count accepts a third run',()=>{const rows=[...marks([60,70,80],3),...marks([75,65,85],1)];const result=riderResult(rows,panel.slice(0,3),3);assert.deepEqual(result.marks,[75,70,85]);assert.equal(result.total,230/3);});

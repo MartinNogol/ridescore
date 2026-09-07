@@ -13,14 +13,20 @@ DEMO režim ukládá data do localStorage daného prohlížeče. Hodí se na vzh
 
 ## Co už prototyp umí
 
+- více samostatných závodů, každý s vlastním nastavením
+- datum, místo, popis, stav závodu, počet jízd a panel porotců
 - veřejný LIVE leaderboard
 - startovní listinu
-- online přihlášku závodníka
+- online přihlášku závodníka bez výběru kategorie
+- automatické zařazení podle roku narození
 - Admin dashboard
 - prezenci jezdců
-- kategorie a počet runů
+- kategorie s rozsahem ročníků (od/do)
+- mazání a úpravu kategorií
+- ruční i automatické rozdělení do heatů
 - role uživatelů
 - Judge mode pro telefon/tablet
+- Speaker mode se startovkou, heaty a informacemi o jezdci
 - scoring podle tabulky: Difficulty, Diversity, Style a Consistency, každé max. 25 bodů
 - 2 runy; u každého porotce se započítá lepší jízda
 - volba 3 nebo 5 porotců v nastavení závodu
@@ -40,9 +46,8 @@ Google Form -> Google Sheets -> Soubor > Stáhnout > CSV -> Admin > Jezdci > Imp
 
 Rozpoznávané sloupce:
 - Jméno závodníka
-- Kategorie
+- Rok narození (případně se vezme rok z data narození)
 - Město
-- Datum narození
 - Sponzoři
 - Instagram
 - Informace o jezdci
