@@ -21,8 +21,13 @@ DEMO režim ukládá data do localStorage daného prohlížeče. Hodí se na vzh
 - kategorie a počet runů
 - role uživatelů
 - Judge mode pro telefon/tablet
-- nastavitelné scoring kritérium / maximum / váhu
-- 2 runy + nejlepší run do leaderboardu
+- scoring podle tabulky: Difficulty, Diversity, Style a Consistency, každé max. 25 bodů
+- 2 runy; u každého porotce se započítá lepší jízda
+- volba 3 nebo 5 porotců v nastavení závodu
+- 3 porotci: výsledek je průměr tří známek
+- 5 porotců: nejnižší a nejvyšší známka se škrtne a výsledek je průměr zbývajících tří
+- výsledek se zobrazí až po hodnocení od všech porotců
+- nastavitelné maximum a váha kritérií
 - export výsledků do CSV
 - import přihlášek z CSV exportu Google Forms / Google Sheets
 - responzivní mobilní design
@@ -57,25 +62,16 @@ Pro více rozhodčích a LIVE synchronizaci doporučuji Supabase.
 
 Poznámka: schema je bezpečný starter. Veřejnou registraci je vhodné dokončit atomickým RPC/Edge Function endpointem, protože datum narození a případný kontakt rodiče nesmí být veřejně čitelný.
 
-## Co doladit podle Martinova Excelu
+## Pravidla převzatá z Excelu
 
-Scoring v demo verzi je úmyslně konfigurovatelný. Výchozí kritéria jsou pouze ukázka:
-- Difficulty
-- Execution
-- Style
-- Variety
-- Use of park
+V souborech `+14 Hodnoceni zavodu.xlsx`, `-14 let Hodnoceni zavodu.xlsx` a `-10 Hodnoceni zavodu.xlsx` je stejná logika:
 
-Po dodání scoringového Excelu upravit 1:1:
-- přesná kritéria a maxima
-- počet rozhodčích
-- váhy
-- zahazování nejvyšší / nejnižší známky
-- kvalifikace vs finále
-- počet runů
-- best run / average / combined score
-- tie-break pravidla
-- penalizace
+1. Každá jízda se skládá z Difficulty, Diversity, Style a Consistency (0–25 bodů).
+2. Každý porotce ohodnotí dvě jízdy a pro jezdce se použije jeho lepší jízda.
+3. Při pěti porotcích se z pěti výsledků odstraní jedno minimum a jedno maximum a zprůměrují se tři zbývající.
+4. Při třech porotcích se zprůměrují všechny tři výsledky.
+
+V administraci se počet porotců a konkrétní obsazení panelu mění v části **Scoring**. Stejné pravidlo používá leaderboard i export CSV.
 
 ## Doporučený produkční tok
 
