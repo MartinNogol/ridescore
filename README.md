@@ -79,7 +79,7 @@ Přihláška -> databáze -> prezence -> kategorie/startovka -> rozhodčí -> re
 
 ## Stav vývoje
 
-Toto je původní DEMO prototyp. Samotné doplnění Supabase klíčů nestačí k ostrému provozu: načítání a ukládání skóre, synchronizace mezi zařízeními a oprávnění se musí dokončit a otestovat. Scoringová pravidla čekají na původní Excel.
+Toto je stále DEMO prototyp. Samotné doplnění Supabase klíčů nestačí k ostrému provozu: načítání a ukládání skóre, synchronizace mezi zařízeními a oprávnění se musí dokončit a otestovat. Pravidla výpočtu už odpovídají dodanému Excelu, včetně volby tří nebo pěti porotců.
 
 ## Propojení GitHub → Netlify
 
