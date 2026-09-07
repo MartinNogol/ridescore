@@ -10,16 +10,15 @@
   modeBadge.textContent = DEMO ? 'DEMO režim • data zůstávají v tomto prohlížeči' : 'ONLINE • Supabase';
 
   const scoringDefault = [
-    {key:'difficulty',label:'Difficulty',max:20,weight:1,desc:'Obtížnost triků a kombinací'},
-    {key:'execution',label:'Execution',max:20,weight:1,desc:'Čistota provedení a kontrola'},
-    {key:'style',label:'Style',max:20,weight:1,desc:'Styl, flow a originalita'},
-    {key:'variety',label:'Variety',max:20,weight:1,desc:'Variabilita triků'},
-    {key:'park',label:'Use of park',max:20,weight:1,desc:'Využití překážek a prostoru'}
+    {key:'difficulty',label:'Difficulty',max:25,weight:1,desc:'Obtížnost'},
+    {key:'diversity',label:'Diversity',max:25,weight:1,desc:'Rozmanitost'},
+    {key:'style',label:'Style',max:25,weight:1,desc:'Styl'},
+    {key:'consistency',label:'Consistency',max:25,weight:1,desc:'Konzistence'}
   ];
 
   const seed = {
     currentUser:null,
-    event:{id:'ev1',name:'Scootshop Contest 2026',slug:'scootshop-contest-2026',date:'29. 8. 2026',location:'Ústí nad Orlicí',status:'live'},
+    event:{id:'ev1',name:'Scootshop Contest 2026',slug:'scootshop-contest-2026',date:'29. 8. 2026',location:'Ústí nad Orlicí',status:'live',judgeCount:5},
     categories:[
       {id:'c1',name:'U13',runs:2,advance:8,order:1},
       {id:'c2',name:'U16',runs:2,advance:8,order:2},
@@ -35,18 +34,10 @@
       {id:'r5',bib:51,name:'Demo jezdec 5',categoryId:'c3',city:'',birth:'',sponsors:'',instagram:'',bio:'',status:'registered'},
       {id:'r6',bib:3,name:'Demo jezdec 6',categoryId:'c4',city:'',birth:'',sponsors:'',instagram:'',bio:'',status:'checked-in'}
     ],
-    scores:[
-      {id:'s1',riderId:'r1',categoryId:'c2',run:1,judge:'Judge 1',values:{difficulty:18.2,execution:17.5,style:18.4,variety:17.9,park:18.1},total:90.1,submitted:true},
-      {id:'s2',riderId:'r1',categoryId:'c2',run:2,judge:'Judge 1',values:{difficulty:18.5,execution:18.1,style:18.6,variety:18.0,park:18.5},total:91.7,submitted:true},
-      {id:'s3',riderId:'r2',categoryId:'c2',run:1,judge:'Judge 1',values:{difficulty:17.8,execution:17.9,style:18.0,variety:17.7,park:18.0},total:89.4,submitted:true},
-      {id:'s4',riderId:'r2',categoryId:'c2',run:2,judge:'Judge 1',values:{difficulty:17.5,execution:17.8,style:17.7,variety:17.6,park:17.6},total:88.2,submitted:true},
-      {id:'s5',riderId:'r3',categoryId:'c2',run:1,judge:'Judge 1',values:{difficulty:17.1,execution:16.8,style:17.0,variety:17.0,park:17.2},total:85.1,submitted:true},
-      {id:'s6',riderId:'r3',categoryId:'c2',run:2,judge:'Judge 1',values:{difficulty:17.6,execution:17.5,style:17.8,variety:17.3,park:17.6},total:87.8,submitted:true}
-    ],
+    scores:[],
     judges:[
-      {id:'u1',name:'Demo administrátor',email:'admin@example.invalid',role:'admin'},
-      {id:'u2',name:'Demo rozhodčí 1',email:'judge1@example.invalid',role:'judge'},
-      {id:'u3',name:'Demo rozhodčí 2',email:'judge2@example.invalid',role:'judge'}
+      {id:'admin',name:'Demo administrátor',email:'admin@example.invalid',role:'admin'},
+      ...Array.from({length:5},(_,i)=>({id:'judge-'+(i+1),name:'Demo porotce '+(i+1),email:'judge'+(i+1)+'@example.invalid',role:'judge'}))
     ],
     judgeState:{categoryId:'c2',riderIndex:0,run:1,values:{}}
   };
@@ -61,6 +52,24 @@
     save(){ if(DEMO) localStorage.setItem('scootScoringData',JSON.stringify(state)); }
   };
   let state = store.load();
+  state.event.judgeCount = [3,5].includes(state.event.judgeCount) ? state.event.judgeCount : 5;
+  if (!state.event.panelIds) {
+    state.event.panelIds = state.judges.filter(j=>['judge','head_judge'].includes(j.role)).slice(0,state.event.judgeCount).map(j=>j.id);
+    // Existing browser data stays intact. New demo slots only fill missing seats.
+    while (DEMO && state.event.panelIds.length < state.event.judgeCount) {
+      const id='demo-panel-'+(state.event.panelIds.length+1);
+      if (!state.judges.some(j=>j.id===id)) state.judges.push({id,name:'Demo porotce '+(state.event.panelIds.length+1),email:id+'@example.invalid',role:'judge'});
+      state.event.panelIds.push(id);
+    }
+  }
+  for (const score of state.scores) {
+    if (!score.judgeId) score.judgeId=state.judges.find(j=>j.name===score.judge)?.id || 'legacy:'+score.judge;
+  }
+  store.save();
+  const panel = () => state.event.panelIds.slice(0,state.event.judgeCount);
+  const ruleText = () => state.event.judgeCount===5 ? '5 porotců • nejnižší a nejvyšší známka se škrtá • průměr 3' : '3 porotci • průměr všech 3 známek';
+  const currentJudgeId = () => DEMO ? (state.judgeState.judgeId || panel()[0]) : state.currentUser?.id;
+
 
   const escapeHtml = (v='') => String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
   const uid = (p='id') => p+Math.random().toString(36).slice(2,9);
@@ -98,23 +107,22 @@
   }
 
   function leaderboard(categoryId='c2'){
-    const rows = state.riders.filter(r=>r.categoryId===categoryId).map(r=>{
-      const ss=state.scores.filter(s=>s.riderId===r.id && s.submitted);
-      const run1=ss.filter(s=>s.run===1).map(s=>s.total); const run2=ss.filter(s=>s.run===2).map(s=>s.total);
-      const avg=a=>a.length?+(a.reduce((x,y)=>x+y,0)/a.length).toFixed(2):null;
-      const a=avg(run1),b=avg(run2),best=Math.max(a??-1,b??-1);return {...r,run1:a,run2:b,best:best<0?null:best};
-    }).sort((a,b)=>(b.best??-1)-(a.best??-1));
+    const rows=state.riders.filter(r=>r.categoryId===categoryId).map(r=>{
+      const result=window.ScootScoring.riderResult(state.scores.filter(s=>s.riderId===r.id && s.categoryId===categoryId),panel());
+      return {...r,...result,best:result.total};
+    }).sort((a,b)=>(b.best??-1)-(a.best??-1) || a.bib-b.bib);
+    rows.forEach((r,i)=>r.rank=r.best===null ? null : (i && rows[i-1].best===r.best ? rows[i-1].rank : i+1));
     return rows;
   }
 
   function renderLive(){
-    const selected = sessionStorage.getItem('liveCat') || 'c2';
-    app.innerHTML = publicHero('Výsledky v reálném čase.','Body od rozhodčích se propisují přímo do leaderboardu. Diváci, speaker i riders vidí stejné pořadí bez přepisování tabulek.') + `
-      <div class="section-title"><div><h2>Live leaderboard</h2><p>Nejlepší jízda ze dvou runů</p></div><span class="pill live">AUTO REFRESH</span></div>
+    const selected=sessionStorage.getItem('liveCat') || 'c2';
+    app.innerHTML=publicHero('Výsledky závodu.','U každého porotce se vybírá lepší ze dvou jízd. Výsledek čeká na známku od celé poroty.')+`
+      <div class="section-title"><div><h2>Výsledky</h2><p>${ruleText()}</p></div><span class="pill">${DEMO?'DEMO • tento prohlížeč':'Scoring'}</span></div>
       <div class="toolbar"><div class="tabs">${state.categories.map(c=>`<button class="tab ${selected===c.id?'active':''}" data-live-cat="${c.id}">${escapeHtml(c.name)}</button>`).join('')}</div><button class="btn btn-outline" data-action="export-results">Export CSV</button></div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Rider</th><th>Run 1</th><th>Run 2</th><th>Best</th></tr></thead><tbody>
-      ${leaderboard(selected).map((r,i)=>`<tr><td class="rank">${i+1}</td><td><div class="rider-name">${escapeHtml(r.name)}</div><div class="rider-meta">#${r.bib} • ${escapeHtml(r.city)}${r.sponsors?' • '+escapeHtml(r.sponsors):''}</div></td><td class="score">${r.run1?.toFixed(1)??'—'}</td><td class="score">${r.run2?.toFixed(1)??'—'}</td><td class="score score-best">${r.best?.toFixed(1)??'—'}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">Zatím bez výsledků.</td></tr>`}
-      </tbody></table></div>`;
+      <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Jezdec</th>${panel().map((id,i)=>`<th title="${escapeHtml(state.judges.find(j=>j.id===id)?.name||'')}">Porotce ${i+1}</th>`).join('')}<th>Výsledek</th></tr></thead><tbody>
+      ${leaderboard(selected).map(r=>`<tr><td class="rank">${r.rank??'—'}</td><td><div class="rider-name">${escapeHtml(r.name)}</div><div class="rider-meta">#${r.bib}</div></td>${r.marks.map((v,i)=>`<td class="score">${v===null?'—':r.dropped.includes(i)?`<del title="Škrtnutá známka">${v.toFixed(2)}</del>`:v.toFixed(2)}</td>`).join('')}<td class="score score-best">${r.best===null?`<span class="help">Čeká ${r.received}/${state.event.judgeCount}</span>`:r.best.toFixed(2)}</td></tr>`).join('') || `<tr><td colspan="${panel().length+3}" class="empty">Zatím bez výsledků.</td></tr>`}
+      </tbody></table></div><p class="help">Přeškrtnuté známky se nepočítají. Při shodě se škrtá vždy jen jedna nejnižší a jedna nejvyšší známka. Shodné výsledky sdílejí pořadí.</p>`;
     $$('[data-live-cat]').forEach(b=>b.onclick=()=>{sessionStorage.setItem('liveCat',b.dataset.liveCat);renderLive()});
     $('[data-action="export-results"]')?.addEventListener('click',()=>exportResults(selected));
   }
@@ -191,10 +199,22 @@
 
   function adminSettings(){
     const max=state.scoring.reduce((s,c)=>s+c.max*c.weight,0);
-    const content=adminHeader('Scoring pravidla','Kritéria jsou konfigurovatelná. Až dodáš Excel, nastavíme je 1:1.',`<button class="btn btn-primary" data-action="add-criterion">+ Kritérium</button>`)+`
-      <div class="card"><div class="section-title" style="margin-top:0"><div><h2>Kritéria</h2><p>Maximum celkem: ${max}</p></div></div>${state.scoring.map((c,i)=>`<div class="criterion"><div class="criterion-head"><div><b>${escapeHtml(c.label)}</b><div class="help">${escapeHtml(c.desc||'')}</div></div><div style="display:flex;align-items:center;gap:10px"><span class="pill">max ${c.max} • váha ${c.weight}</span><button class="icon-btn" data-edit-criterion="${i}">✎</button></div></div></div>`).join('')}</div>
-      <div class="card mt"><h3>Výpočet výsledku</h3><p class="muted">Aktuální demo: součet kritérií, 2 runy, do pořadí se počítá nejlepší run. V ostré verzi můžeme nastavit průměr rozhodčích, škrtání nejvyšší/nejnižší známky i tie-break přesně podle Excelu.</p></div>`;
+    const content=adminHeader('Scoring pravidla','Počet porotců a pravidla tohoto závodu.',`<button class="btn btn-primary" data-action="add-criterion">+ Kritérium</button>`)+`
+      <form id="panelForm" class="card form-grid"><div class="field full"><label for="judgeCount">Počet porotců v závodě</label><select id="judgeCount" class="select"><option value="3" ${state.event.judgeCount===3?'selected':''}>3 — průměr všech známek</option><option value="5" ${state.event.judgeCount===5?'selected':''}>5 — škrtnout minimum a maximum</option></select></div><div id="panelSeats" class="field full"></div><div class="field full"><button class="btn btn-primary">Uložit porotu</button><p class="help">Změna poroty přepočítá výsledky. Dosavadní hodnocení zůstávají uložená.</p></div></form>
+      <div class="card mt"><div class="section-title" style="margin-top:0"><div><h2>Kritéria</h2><p>Maximum celkem: ${max}</p></div></div>${state.scoring.map((c,i)=>`<div class="criterion"><div class="criterion-head"><div><b>${escapeHtml(c.label)}</b><div class="help">${escapeHtml(c.desc||'')}</div></div><div style="display:flex;align-items:center;gap:10px"><span class="pill">max ${c.max} • váha ${c.weight}</span><button class="icon-btn" data-edit-criterion="${i}">✎</button></div></div></div>`).join('')}</div>
+      <div class="card mt"><h3>Výpočet výsledku</h3><p class="muted">${ruleText()}. Nejprve lepší ze dvou jízd u každého porotce, potom průměr poroty podle Excelu. Výsledek se zobrazí, až hodnotí všichni. Nové závody používají Difficulty, Diversity, Style a Consistency po 25 bodech; dříve uložená kritéria zůstávají zachována.</p></div>`;
     app.innerHTML=layoutSide(content,'settings');bindAdminCommon();$('[data-action="add-criterion"]')?.addEventListener('click',()=>openCriterion());$$('[data-edit-criterion]').forEach(b=>b.onclick=()=>openCriterion(+b.dataset.editCriterion));
+    const drawSeats=()=>{
+      const count=+$('#judgeCount').value;
+      const previous=$$('[data-panel-seat]').map(s=>s.value);
+      $('#panelSeats').innerHTML=Array.from({length:count},(_,i)=>`<label for="seat${i}">Porotce ${i+1}</label><select id="seat${i}" class="select" data-panel-seat><option value="">Vyber porotce</option>${state.judges.filter(j=>['judge','head_judge'].includes(j.role)).map(j=>`<option value="${escapeHtml(j.id)}" ${j.id===(previous[i]||state.event.panelIds[i])?'selected':''}>${escapeHtml(j.name)}</option>`).join('')}</select>`).join('');
+    };
+    drawSeats(); $('#judgeCount').onchange=drawSeats;
+    $('#panelForm').onsubmit=e=>{
+      e.preventDefault();const ids=$$('[data-panel-seat]').map(s=>s.value);const count=+$('#judgeCount').value;
+      if(![3,5].includes(count)||ids.length!==count||ids.some(id=>!id)||new Set(ids).size!==count){toast('Vyber různé porotce pro všechna místa.');return;}
+      state.event.judgeCount=count;state.event.panelIds=ids;state.judgeState.judgeId=ids[0];state.judgeState.values={};save();toast('Porota uložena, výsledky přepočítány.');adminSettings();
+    };
   }
 
   function renderAdmin(){if(!state.currentUser && DEMO){state.currentUser={name:'Demo administrátor',role:'admin'}};const section=sessionStorage.getItem('adminSection')||'dashboard';({dashboard:adminDashboard,riders:adminRiders,categories:adminCategories,judges:adminJudges,settings:adminSettings}[section]||adminDashboard)()}
@@ -211,18 +231,28 @@
     const idx=Math.min(state.judgeState.riderIndex||0,Math.max(0,list.length-1)); const r=list[idx];
     if(!state.judgeState.values || Object.keys(state.judgeState.values).length===0) state.judgeState.values=Object.fromEntries(state.scoring.map(c=>[c.key,0]));
     const vals=state.judgeState.values; const total=scoreTotal(vals); const max=state.scoring.reduce((s,c)=>s+c.max*c.weight,0);
-    const content=adminHeader('Judge mode','Rychlé zadávání bodů z mobilu nebo tabletu.',`<select id="judgeCat" class="select">${state.categories.map(c=>`<option value="${c.id}" ${c.id===state.judgeState.categoryId?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}</select>`)+`${r?`<div class="judge-grid"><div class="card"><div class="current-rider"><div style="display:flex;gap:14px;align-items:center"><div class="bib">${r.bib}</div><div><div class="eyebrow">RUN ${state.judgeState.run}</div><h2>${escapeHtml(r.name)}</h2><div class="muted">${escapeHtml(r.city)} • ${escapeHtml(catName(r.categoryId))}</div></div></div><span class="pill">${idx+1} / ${list.length}</span></div>
+    const content=adminHeader('Judge mode','Rychlé zadávání bodů z mobilu nebo tabletu.',`${DEMO?`<label>Demo porotce <select id="demoJudge" class="select">${panel().map(id=>`<option value="${escapeHtml(id)}" ${id===currentJudgeId()?'selected':''}>${escapeHtml(state.judges.find(j=>j.id===id)?.name||id)}</option>`).join('')}</select></label>`:''}<select id="judgeCat" class="select">${state.categories.map(c=>`<option value="${c.id}" ${c.id===state.judgeState.categoryId?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}</select>`)+`${r?`<div class="judge-grid"><div class="card"><div class="current-rider"><div style="display:flex;gap:14px;align-items:center"><div class="bib">${r.bib}</div><div><div class="eyebrow">RUN ${state.judgeState.run}</div><h2>${escapeHtml(r.name)}</h2><div class="muted">${escapeHtml(r.city)} • ${escapeHtml(catName(r.categoryId))}</div></div></div><span class="pill">${idx+1} / ${list.length}</span></div>
       ${state.scoring.map(c=>`<div class="criterion"><div class="criterion-head"><div><b>${escapeHtml(c.label)}</b><div class="help">${escapeHtml(c.desc||'')}</div></div><span class="criterion-score" data-score-label="${c.key}">${(+vals[c.key]||0).toFixed(1)}</span></div><input class="range" type="range" min="0" max="${c.max}" step="0.1" value="${+vals[c.key]||0}" data-criterion="${c.key}"></div>`).join('')}
       </div><aside class="card total-box"><div class="eyebrow">CELKOVÉ SKÓRE</div><div class="big-total" id="judgeTotal">${total.toFixed(1)}</div><div class="total-max">z ${max}</div><div class="progress"><span id="judgeProgress" style="width:${total/max*100}%"></span></div><div class="total-actions"><button class="btn btn-primary" data-action="submit-score">Odeslat score</button><button class="btn btn-outline" data-action="reset-score">Vynulovat</button><div class="grid grid-2"><button class="btn btn-outline" data-action="prev-rider">← Předchozí</button><button class="btn btn-outline" data-action="next-rider">Další →</button></div><div class="tabs" style="width:100%;justify-content:center"><button class="tab ${state.judgeState.run===1?'active':''}" data-run="1">Run 1</button><button class="tab ${state.judgeState.run===2?'active':''}" data-run="2">Run 2</button></div></div><div class="judge-history"><b>Uložené známky</b>${state.scores.filter(s=>s.riderId===r.id).map(s=>`<div class="history-row"><span>Run ${s.run} • ${escapeHtml(s.judge)}</span><b>${s.total.toFixed(1)}</b></div>`).join('')||'<span class="muted">Zatím nic.</span>'}</div></aside></div>`:`<div class="card empty">V této kategorii není žádný prezentovaný jezdec.</div>`}`;
     app.innerHTML=layoutSide(content,'judge');
     $$('[data-side]').forEach(b=>b.onclick=()=>{if(b.dataset.side==='judge')return;sessionStorage.setItem('adminSection',b.dataset.side);location.hash='admin'});$('[data-action="logout"]')?.addEventListener('click',logout);
+    $('#demoJudge')?.addEventListener('change',e=>{state.judgeState.judgeId=e.target.value;state.judgeState.values={};save();renderJudge()});
     $('#judgeCat')?.addEventListener('change',e=>{state.judgeState.categoryId=e.target.value;state.judgeState.riderIndex=0;state.judgeState.values={};save();renderJudge()});
     $$('[data-criterion]').forEach(inp=>inp.oninput=()=>{state.judgeState.values[inp.dataset.criterion]=+inp.value;const t=scoreTotal(state.judgeState.values);$(`[data-score-label="${inp.dataset.criterion}"]`).textContent=(+inp.value).toFixed(1);$('#judgeTotal').textContent=t.toFixed(1);$('#judgeProgress').style.width=(t/max*100)+'%';save()});
     $$('[data-run]').forEach(b=>b.onclick=()=>{state.judgeState.run=+b.dataset.run;state.judgeState.values={};save();renderJudge()});
     $('[data-action="reset-score"]')?.addEventListener('click',()=>{state.judgeState.values={};save();renderJudge()});
     $('[data-action="prev-rider"]')?.addEventListener('click',()=>{state.judgeState.riderIndex=Math.max(0,idx-1);state.judgeState.values={};save();renderJudge()});
     $('[data-action="next-rider"]')?.addEventListener('click',()=>{state.judgeState.riderIndex=Math.min(list.length-1,idx+1);state.judgeState.values={};save();renderJudge()});
-    $('[data-action="submit-score"]')?.addEventListener('click',()=>{const t=scoreTotal(state.judgeState.values);if(t<=0){toast('Nejdřív zadej body.');return}state.scores.push({id:uid('s'),riderId:r.id,categoryId:r.categoryId,run:state.judgeState.run,judge:state.currentUser?.name||'Judge',values:{...state.judgeState.values},total:t,submitted:true});state.judgeState.values={};state.judgeState.riderIndex=Math.min(list.length-1,idx+1);save();toast('Score '+t.toFixed(1)+' uložen.');renderJudge()});
+    $('[data-action="submit-score"]')?.addEventListener('click',()=>{
+      const judgeId=currentJudgeId();
+      if(!panel().includes(judgeId)){toast('Tento účet není přiřazen do poroty.');return;}
+      const values=Object.fromEntries(state.scoring.map(c=>[c.key,Number(state.judgeState.values[c.key]??0)]));
+      if(state.scoring.some(c=>!Number.isFinite(values[c.key])||values[c.key]<0||values[c.key]>c.max)){toast('Body musí být v povoleném rozsahu.');return;}
+      const t=scoreTotal(values);const run=state.judgeState.run;
+      const entry={id:uid('s'),riderId:r.id,categoryId:r.categoryId,run,judgeId,judge:state.judges.find(j=>j.id===judgeId)?.name||'Porotce',values,total:t,submitted:true};
+      state.scores=state.scores.filter(s=>!(s.riderId===r.id && s.categoryId===r.categoryId && s.run===run && s.judgeId===judgeId));
+      state.scores.push(entry);state.judgeState.values={};state.judgeState.riderIndex=Math.min(list.length-1,idx+1);save();toast('Score '+t.toFixed(1)+' uložen.');renderJudge();
+    });
   }
 
   function logout(){state.currentUser=null;save();if(sb)sb.auth.signOut();location.hash='login'}
@@ -239,14 +269,19 @@
   function parseCSV(text){const first=(text.split(/\r?\n/)[0]||'');const delim=(first.match(/;/g)||[]).length>(first.match(/,/g)||[]).length?';':',';const out=[];let row=[],cell='',q=false;for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'){if(q&&text[i+1]==='"'){cell+='"';i++}else q=!q}else if(ch===delim&&!q){row.push(cell);cell=''}else if((ch==='\n'||ch==='\r')&&!q){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(x=>x.trim()))out.push(row);row=[];cell=''}else cell+=ch}if(cell||row.length){row.push(cell);out.push(row)}return out}
   function importRows(rows){if(rows.length<2)return 0;const norm=s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();const headers=rows[0].map(norm);const idx=(...names)=>headers.findIndex(h=>names.some(n=>h.includes(norm(n))));const iName=idx('jméno závodníka','jmeno zavodnika','jméno','name'),iCat=idx('kategorie','category'),iCity=idx('město','mesto','city'),iBirth=idx('datum narození','datum narozeni','birth'),iSponsors=idx('sponzoři','sponzori','sponsors'),iIg=idx('instagram'),iBio=idx('informace o jezdci','bio');let count=0;for(const row of rows.slice(1)){const name=row[iName]?.trim();if(!name)continue;const catRaw=row[iCat]?.trim();let c=state.categories.find(x=>norm(x.name)===norm(catRaw||''));if(!c){c={id:uid('c'),name:catRaw||'OPEN',runs:2,advance:8,order:state.categories.length+1};state.categories.push(c)}state.riders.push({id:uid('r'),bib:Math.max(0,...state.riders.map(r=>+r.bib||0))+1,name,categoryId:c.id,city:iCity>=0?row[iCity]||'':'',birth:iBirth>=0?row[iBirth]||'':'',sponsors:iSponsors>=0?row[iSponsors]||'':'',instagram:iIg>=0?row[iIg]||'':'',bio:iBio>=0?row[iBio]||'':'',status:'registered'});count++}return count}
 
-  function exportResults(catId){const rows=leaderboard(catId);const csv=['Poradi;Startovni cislo;Jezdec;Kategorie;Run 1;Run 2;Best',...rows.map((r,i)=>[i+1,r.bib,r.name,catName(r.categoryId),r.run1??'',r.run2??'',r.best??''].join(';'))].join('\n');download('vysledky-'+catName(catId)+'.csv',csv)}
+  function exportResults(catId){
+    const cell=v=>'"'+String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"';
+    const rows=[['Pořadí','Startovní číslo','Jezdec','Kategorie',...panel().map((_,i)=>'Porotce '+(i+1)),'Škrtnuto min','Škrtnuto max','Výsledek','Hodnoceno','Počet porotců'],
+      ...leaderboard(catId).map(r=>[r.rank,r.bib,r.name,catName(r.categoryId),...r.marks,r.dropped.length?r.marks[r.dropped[0]]:'',r.dropped.length?r.marks[r.dropped[1]]:'',r.best===null?'':r.best.toFixed(2),r.received,state.event.judgeCount])];
+    download('vysledky-'+catName(catId)+'.csv',rows.map(row=>row.map(cell).join(';')).join('\n'));
+  }
   function download(name,text){const blob=new Blob(['\ufeff'+text],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();URL.revokeObjectURL(a.href)}
 
   async function handleAuth(){
     if(!sb)return false; const {data:{session}}=await sb.auth.getSession(); if(!session)return false;
     const email=session.user.email;let role='viewer',name=session.user.user_metadata?.full_name||email;
     const {data}=await sb.from('profiles').select('role,full_name').eq('id',session.user.id).maybeSingle();if(data){role=data.role||role;name=data.full_name||name}
-    state.currentUser={name,email,role};save();if(route()==='auth')location.hash=(role==='judge'||role==='head_judge')?'judge':'admin';return true;
+    state.currentUser={id:session.user.id,name,email,role};save();if(route()==='auth')location.hash=(role==='judge'||role==='head_judge')?'judge':'admin';return true;
   }
 
   async function render(){setActiveNav();await handleAuth();const r=route();if(r==='live')renderLive();else if(r==='startlist')renderStartlist();else if(r==='registration')renderRegistration();else if(r==='login'||r==='auth')renderLogin();else if(r==='admin')renderAdmin();else if(r==='judge')renderJudge();else renderLive();window.scrollTo({top:0,behavior:'instant'})}
