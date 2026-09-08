@@ -34,7 +34,7 @@ DEMO režim ukládá data do localStorage daného prohlížeče. Hodí se na vzh
 - 5 porotců: nejnižší a nejvyšší známka se škrtne a výsledek je průměr zbývajících tří
 - výsledek se zobrazí až po hodnocení od všech porotců
 - nastavitelné maximum a váha kritérií
-- export výsledků do CSV
+- export výsledků do Excelu (.xlsx)
 - import přihlášek z CSV exportu Google Forms / Google Sheets
 - responzivní mobilní design
 
@@ -76,11 +76,11 @@ V souborech `+14 Hodnoceni zavodu.xlsx`, `-14 let Hodnoceni zavodu.xlsx` a `-10 
 3. Při pěti porotcích se z pěti výsledků odstraní jedno minimum a jedno maximum a zprůměrují se tři zbývající.
 4. Při třech porotcích se zprůměrují všechny tři výsledky.
 
-V administraci se počet porotců a konkrétní obsazení panelu mění v části **Scoring**. Stejné pravidlo používá leaderboard i export CSV.
+V administraci se počet porotců a konkrétní obsazení panelu mění v části **Scoring**. Stejné pravidlo používá leaderboard i export Excel.
 
 ## Doporučený produkční tok
 
-Přihláška -> databáze -> prezence -> kategorie/startovka -> rozhodčí -> realtime score -> live výsledky -> CSV/PDF export.
+Přihláška -> databáze -> prezence -> kategorie/startovka -> rozhodčí -> realtime score -> live výsledky -> Excel export.
 
 ## Stav vývoje
 
